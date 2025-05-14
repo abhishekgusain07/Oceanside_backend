@@ -1,3 +1,6 @@
+"""
+Main API router that includes all endpoint-specific routers.
+"""
 from fastapi import APIRouter
 
 from app.api.endpoints import health
@@ -11,6 +14,7 @@ api_router.include_router(
 )
 
 # Add more endpoint routers here as needed
+# Example:
 # api_router.include_router(
 #     users.router, prefix="/users", tags=["users"]
 # )

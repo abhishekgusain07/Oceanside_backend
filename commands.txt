@@ -1,0 +1,54 @@
+# Development
+
+# Create and activate virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+# OR
+.venv\Scripts\activate     # Windows
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Run the development server
+uvicorn app.main:app --reload
+
+# Create a migration (after model changes)
+alembic revision --autogenerate -m "Description of changes"
+
+# Apply migrations
+alembic upgrade head
+
+# Downgrade migrations
+alembic downgrade -1  # Downgrade one migration
+alembic downgrade base  # Downgrade all migrations
+
+# Run tests
+pytest
+
+# Run tests with coverage
+pytest --cov=app
+
+# Docker
+
+# Build and start the containers
+docker-compose up -d
+
+# Stop containers
+docker-compose down
+
+# View logs
+docker-compose logs -f
+
+# Access PostgreSQL in Docker
+docker exec -it fastapi_template_db psql -U postgres -d fastapi_template
+
+# Formatting and Linting
+
+# Format code with Black
+black .
+
+# Run linter
+ruff check .
+
+# Run type checking
+mypy app 

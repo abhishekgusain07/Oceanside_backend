@@ -1,66 +1,45 @@
+"""
+Logging configuration for the application.
+"""
 import logging
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
-from loguru import logger
-from pydantic import BaseModel
+import structlog
+from structlog.types import Processor
 
 from app.core.config import settings
 
 
-class LoggingConfig(BaseModel):
-    """Logging configuration to be set for the server"""
+def configure_logging() -> None:
+    """Configure logging for the application using structlog."""
+    shared_processors: list[Processor] = [
+        structlog.contextvars.merge_contextvars,
+        structlog.processors.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+    ]
 
-    LOGGER_NAME: str = "fastapi-template"
-    LOG_FORMAT: str = "<level>{level: <8}</level> <green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> - <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
-    LOG_LEVEL: str = settings.LOG_LEVEL
+    if settings.JSON_LOGS:
+        # Production: JSON logs for machine processing
+        formatter = structlog.processors.JSONRenderer()
+    else:
+        # Development: Console logs for human reading
+        formatter = structlog.dev.ConsoleRenderer(colors=True)
 
+    structlog.configure(
+        processors=shared_processors + [formatter],
+        logger_factory=structlog.stdlib.LoggerFactory(),
+        cache_logger_on_first_use=True,
+    )
 
-logging_config = LoggingConfig()
-
-
-class InterceptHandler(logging.Handler):
-    """
-    Default handler from examples in loguru documentation.
-    See https://loguru.readthedocs.io/en/stable/overview.html#entirely-compatible-with-standard-logging
-    """
-
-    def emit(self, record: logging.LogRecord) -> None:
-        # Get corresponding Loguru level if it exists
-        try:
-            level = logger.level(record.levelname).name
-        except ValueError:
-            level = record.levelno
-
-        # Find caller from where originated the logged message
-        frame, depth = logging.currentframe(), 2
-        while frame.f_code.co_filename == logging.__file__:
-            frame = frame.f_back
-            depth += 1
-
-        logger.opt(depth=depth, exception=record.exc_info).log(
-            level, record.getMessage()
-        )
-
-
-def setup_logging() -> None:
-    """Configure logging with loguru"""
-    # Intercept everything at the root logger
-    logging.root.handlers = [InterceptHandler()]
-    logging.root.setLevel(logging_config.LOG_LEVEL)
-
-    # Remove every other logger's handlers and propagate to root logger
-    for name in logging.root.manager.loggerDict.keys():
-        logging.getLogger(name).handlers = []
-        logging.getLogger(name).propagate = True
-
-    # Configure loguru
-    logger.configure(
-        handlers=[
-            {
-                "sink": sys.stdout,
-                "level": logging_config.LOG_LEVEL,
-                "format": logging_config.LOG_FORMAT,
-            }
-        ]
+    # Configure stdlib logging
+    log_level = getattr(logging, settings.LOG_LEVEL.upper())
+    logging.basicConfig(
+        format="%(message)s",
+        level=log_level,
+        stream=sys.stdout,
     )

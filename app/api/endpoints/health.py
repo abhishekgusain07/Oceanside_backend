@@ -1,40 +1,38 @@
+"""
+Health check endpoint to verify service availability.
+"""
+import structlog
 from fastapi import APIRouter, Depends, status
-from pydantic import BaseModel
-from sqlalchemy.orm import Session
 
-from app.core.deps import get_db
+from app.api.dependencies import get_current_timestamp
+from app.schemas.health import HealthResponse
+from app.services.health_service import HealthService, get_health_service
 
+# Create a logger for this module
+logger = structlog.get_logger(__name__)
 
+# Create router for health-related endpoints
 router = APIRouter()
-
-
-class HealthResponse(BaseModel):
-    status: str
-    database_status: str
 
 
 @router.get(
     "",
     response_model=HealthResponse,
     status_code=status.HTTP_200_OK,
-    summary="Health check endpoint",
+    summary="Health Check",
+    description="Check if the service and database are up and running",
+    response_description="Health information about the service",
 )
-async def health_check(db: Session = Depends(get_db)) -> HealthResponse:
+async def health_check(
+    timestamp: str = Depends(get_current_timestamp),
+    health_service: HealthService = Depends(get_health_service),
+):
     """
-    Check the health of the API and database connection.
+    Endpoint to check the health of the service.
     
     Returns:
-        HealthResponse: Health status information
+        A dictionary with health information.
     """
-    # Check database connection
-    try:
-        # Execute a simple query
-        db.execute("SELECT 1")
-        db_status = "healthy"
-    except Exception:
-        db_status = "unhealthy"
+    logger.info("Health check requested", timestamp=timestamp)
     
-    return HealthResponse(
-        status="healthy",
-        database_status=db_status
-    )
+    return await health_service.get_health_info(timestamp)
