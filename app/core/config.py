@@ -3,7 +3,7 @@ Application configuration settings loaded from environment variables.
 """
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 from pydantic import field_validator, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "fastapi_template"
     DATABASE_ECHO: bool = False
+    
+    # CrewAI Settings
+    OPENAI_API_KEY: Optional[str] = None
+    GOOGLE_API_KEY: Optional[str] = None
+    DEFAULT_LLM_PROVIDER: str = "google"
+    DEFAULT_LLM_MODEL: str = "gemini-1.5-flash"
+    DEFAULT_LLM_TEMPERATURE: float = 0.7
     
     @computed_field
     @property
