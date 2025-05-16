@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     
     # CrewAI Settings
     OPENAI_API_KEY: Optional[str] = None
-    GOOGLE_API_KEY: Optional[str] = None
+    GEMINI_API_KEY: Optional[str] = None
     DEFAULT_LLM_PROVIDER: str = "google"
     DEFAULT_LLM_MODEL: str = "gemini-1.5-flash"
     DEFAULT_LLM_TEMPERATURE: float = 0.7

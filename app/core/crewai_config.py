@@ -17,8 +17,8 @@ class CrewAISettings:
         if settings.OPENAI_API_KEY:
             os.environ["OPENAI_API_KEY"] = settings.OPENAI_API_KEY
         
-        if settings.GOOGLE_API_KEY:
-            os.environ["GOOGLE_API_KEY"] = settings.GOOGLE_API_KEY
+        if settings.GEMINI_API_KEY:
+            os.environ["GEMINI_API_KEY"] = settings.GEMINI_API_KEY
     
     @property
     def OPENAI_API_KEY(self) -> str:
@@ -26,9 +26,9 @@ class CrewAISettings:
         return settings.OPENAI_API_KEY or ""
     
     @property
-    def GOOGLE_API_KEY(self) -> str:
+    def GEMINI_API_KEY(self) -> str:
         """Get the Google API key."""
-        return settings.GOOGLE_API_KEY or ""
+        return settings.GEMINI_API_KEY or ""
     
     @property
     def DEFAULT_LLM_PROVIDER(self) -> str:

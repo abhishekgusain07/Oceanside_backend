@@ -73,7 +73,7 @@ Configure the CrewAI implementation through environment variables:
 ```
 # CrewAI Settings
 OPENAI_API_KEY=your_openai_api_key_here
-GOOGLE_API_KEY=your_google_api_key_here
+GEMINI_API_KEY=your_GEMINI_API_KEY_here
 DEFAULT_LLM_PROVIDER=google
 DEFAULT_LLM_MODEL=gemini-1.5-flash
 DEFAULT_LLM_TEMPERATURE=0.7
