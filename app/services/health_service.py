@@ -2,6 +2,8 @@
 Health service functionality.
 """
 import platform
+
+import psutil
 from typing import Dict, Any
 
 import structlog
@@ -33,12 +35,21 @@ class HealthService:
         """
         logger.debug("Retrieving health information")
         
+        # Get system information
+        memory = psutil.virtual_memory()
+        
         health_info = {
             "status": "healthy",
             "timestamp": timestamp,
             "version": settings.VERSION,
             "environment": settings.ENVIRONMENT,
             "python_version": platform.python_version(),
+            "system_info": {
+                "platform": platform.platform(),
+                "cpu_count": psutil.cpu_count(logical=True),
+                "memory_total_gb": round(memory.total / (1024**3), 2),
+                "memory_available_percent": memory.percent,
+            }
         }
         
         # Check database connection if session is available
