@@ -8,6 +8,7 @@ import structlog
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.logging import configure_logging
+from app.core.middleware import RequestIdMiddleware
 
 # Create a logger for this module
 logger = structlog.get_logger(__name__)
@@ -31,6 +32,9 @@ def create_application() -> FastAPI:
         redoc_url=settings.REDOC_URL,
         openapi_url=settings.OPENAPI_URL,
     )
+    
+    # Add request ID middleware (should be added before other middleware)
+    application.add_middleware(RequestIdMiddleware)
     
     # Configure CORS
     application.add_middleware(
