@@ -21,3 +21,11 @@ class TestHealth:
         assert "environment" in data
         assert "python_version" in data
         assert "database_status" in data
+        
+        # Check system info fields
+        assert "system_info" in data
+        system_info = data["system_info"]
+        assert "platform" in system_info
+        assert "cpu_count" in system_info
+        assert "memory_total_gb" in system_info
+        assert "memory_available_percent" in system_info
