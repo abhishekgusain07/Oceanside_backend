@@ -3,7 +3,9 @@ Middleware components for the FastAPI application.
 """
 import uuid
 from contextvars import ContextVar
-from typing import Callable, Dict, Any
+from typing import Callable, Dict, Any, Tuple
+import time
+from fastapi.responses import JSONResponse
 
 import structlog
 from fastapi import Request, Response
@@ -14,6 +16,12 @@ from starlette.types import ASGIApp
 request_id_contextvar: ContextVar[str] = ContextVar("request_id", default="")
 logger = structlog.get_logger(__name__)
 
+# Rate limiting configuration
+RATE_LIMIT_WINDOW = 60  # 1 minute window
+MAX_REQUESTS = 100  # Maximum requests per window
+
+# In-memory rate limiting store (in production, use Redis)
+rate_limit_store: Dict[str, Tuple[int, float]] = {}
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
     """
@@ -83,4 +91,59 @@ def get_request_id() -> str:
     Returns:
         str: Current request ID or empty string if not set
     """
-    return request_id_contextvar.get() 
+    return request_id_contextvar.get()
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    """Middleware to implement rate limiting."""
+    
+    async def dispatch(self, request: Request, call_next):
+        client_ip = request.client.host
+        current_time = time.time()
+        
+        # Clean up old entries
+        rate_limit_store = {k: v for k, v in rate_limit_store.items() 
+                          if current_time - v[1] < RATE_LIMIT_WINDOW}
+        
+        # Check rate limit
+        if client_ip in rate_limit_store:
+            count, window_start = rate_limit_store[client_ip]
+            if count >= MAX_REQUESTS:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Too many requests. Please try again later."}
+                )
+            rate_limit_store[client_ip] = (count + 1, window_start)
+        else:
+            rate_limit_store[client_ip] = (1, current_time)
+        
+        return await call_next(request)
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Middleware to add security headers to all responses."""
+    
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        
+        # Add security headers
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Content-Security-Policy"] = "default-src 'self'"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        
+        return response
+
+class CacheControlMiddleware(BaseHTTPMiddleware):
+    """Middleware to add cache control headers."""
+    
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        
+        # Add cache control headers for GET requests
+        if request.method == "GET":
+            response.headers["Cache-Control"] = "public, max-age=3600"
+        else:
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        
+        return response 
