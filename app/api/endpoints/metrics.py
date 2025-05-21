@@ -1,7 +1,7 @@
 """
 Metrics endpoint for monitoring application performance.
 """
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 from prometheus_client import Counter, Histogram, Gauge
 import time
@@ -9,6 +9,7 @@ import psutil
 import structlog
 
 from app.core.middleware import get_request_id
+from app.core.request_tracker import request_tracker
 
 logger = structlog.get_logger(__name__)
 
@@ -82,4 +83,17 @@ async def system_metrics():
             "free": disk.free,
             "percent": disk.percent
         }
+    }
+
+@router.get("/requests")
+async def request_stats():
+    """
+    Get detailed request statistics.
+    """
+    active_requests = await request_tracker.get_active_requests()
+    stats = await request_tracker.get_request_stats()
+    
+    return {
+        "active_requests": active_requests,
+        "statistics": stats
     } 

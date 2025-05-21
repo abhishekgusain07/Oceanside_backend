@@ -11,6 +11,7 @@ import structlog
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
+from app.core.request_tracker import request_tracker
 
 # Create a context variable to store request ID
 request_id_contextvar: ContextVar[str] = ContextVar("request_id", default="")
@@ -30,6 +31,7 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
     This ID is added to:
     - Response headers
     - Structlog context for logging
+    - Request tracking system
     """
     
     def __init__(self, app: ASGIApp, header_name: str = "X-Request-ID"):
@@ -48,29 +50,38 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
             structlog.contextvars.clear_contextvars()
             structlog.contextvars.bind_contextvars(request_id=request_id)
             
-            # Log request details
-            logger.info(
-                "Request started",
+            # Start tracking the request
+            async with request_tracker.track_request(
+                request_id=request_id,
                 method=request.method,
-                url=str(request.url),
-                client=request.client.host if request.client else None,
-            )
-            
-            # Process the request
-            response = await call_next(request)
-            
-            # Add request_id to response headers
-            response.headers[self.header_name] = request_id
-            
-            # Log response details
-            logger.info(
-                "Request completed",
-                method=request.method,
-                url=str(request.url),
-                status_code=response.status_code,
-            )
-            
-            return response
+                path=str(request.url.path)
+            ):
+                # Log request details
+                logger.info(
+                    "Request started",
+                    method=request.method,
+                    url=str(request.url),
+                    client=request.client.host if request.client else None,
+                )
+                
+                # Process the request
+                response = await call_next(request)
+                
+                # Add request_id to response headers
+                response.headers[self.header_name] = request_id
+                
+                # Complete request tracking
+                await request_tracker.complete_request(request_id, response.status_code)
+                
+                # Log response details
+                logger.info(
+                    "Request completed",
+                    method=request.method,
+                    url=str(request.url),
+                    status_code=response.status_code,
+                )
+                
+                return response
         except Exception as e:
             logger.exception(
                 "Request failed",
@@ -145,5 +156,32 @@ class CacheControlMiddleware(BaseHTTPMiddleware):
             response.headers["Cache-Control"] = "public, max-age=3600"
         else:
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        
+        return response
+
+class RequestTimingMiddleware(BaseHTTPMiddleware):
+    """Middleware to track request timing and performance."""
+    
+    async def dispatch(self, request: Request, call_next):
+        start_time = time.time()
+        
+        # Process the request
+        response = await call_next(request)
+        
+        # Calculate processing time
+        process_time = time.time() - start_time
+        
+        # Add timing headers
+        response.headers["X-Process-Time"] = str(process_time)
+        
+        # Log slow requests
+        if process_time > 1.0:  # Log requests taking more than 1 second
+            logger.warning(
+                "Slow request detected",
+                method=request.method,
+                url=str(request.url),
+                process_time=process_time,
+                status_code=response.status_code
+            )
         
         return response 
