@@ -1,12 +1,15 @@
 """
 Main FastAPI application factory.
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 import structlog
 import asyncio
 import signal
+import time
 from contextlib import asynccontextmanager
+from typing import Dict, Any
 
 from app.api.router import api_router
 from app.core.config import settings
@@ -25,6 +28,9 @@ logger = structlog.get_logger(__name__)
 # Global flag for graceful shutdown
 shutdown_event = asyncio.Event()
 
+# Track active requests
+active_requests: Dict[str, Any] = {}
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -32,7 +38,9 @@ async def lifespan(app: FastAPI):
     Handles startup and shutdown events.
     """
     # Startup
-    logger.info("Starting up application")
+    logger.info("Starting up application", 
+                version=settings.VERSION,
+                environment=settings.ENVIRONMENT)
     
     # Register signal handlers
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -77,21 +85,14 @@ async def handle_shutdown(sig: signal.Signals):
 
 async def wait_for_ongoing_requests():
     """Wait for ongoing requests to complete."""
-    while True:
-        # Check if there are any ongoing requests
-        # This is a placeholder - in a real application, you would track active requests
-        if not any(True for _ in range(10)):  # Replace with actual request tracking
-            break
+    while active_requests:
         await asyncio.sleep(0.1)
 
 async def cleanup():
     """Perform cleanup tasks before shutdown."""
     logger.info("Performing cleanup tasks...")
-    # Add your cleanup tasks here, such as:
-    # - Closing database connections
-    # - Flushing logs
-    # - Closing file handles
-    # - etc.
+    # Add your cleanup tasks here
+    active_requests.clear()
 
 def create_application() -> FastAPI:
     """
@@ -132,8 +133,52 @@ def create_application() -> FastAPI:
     # Include API router
     application.include_router(api_router, prefix=settings.API_V1_STR)
     
+    # Add health check endpoint
+    @application.get("/health")
+    async def health_check():
+        return {
+            "status": "healthy",
+            "version": settings.VERSION,
+            "environment": settings.ENVIRONMENT
+        }
+    
+    # Add request tracking middleware
+    @application.middleware("http")
+    async def track_requests(request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID", "unknown")
+        start_time = time.time()
+        
+        # Track request start
+        active_requests[request_id] = {
+            "start_time": start_time,
+            "path": request.url.path,
+            "method": request.method
+        }
+        
+        try:
+            response = await call_next(request)
+            return response
+        except Exception as e:
+            logger.error("Request failed", 
+                        request_id=request_id,
+                        error=str(e),
+                        exc_info=True)
+            return JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error"}
+            )
+        finally:
+            # Track request end
+            if request_id in active_requests:
+                duration = time.time() - start_time
+                logger.info("Request completed",
+                           request_id=request_id,
+                           duration=duration,
+                           path=request.url.path,
+                           method=request.method)
+                del active_requests[request_id]
+    
     logger.info("Application startup complete")
     return application
-
 
 app = create_application()
