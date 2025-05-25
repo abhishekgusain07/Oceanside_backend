@@ -143,8 +143,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         
         return response
 
+# SecurityHeadersMiddleware commented out - can be re-enabled later if needed
+"""
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Middleware to add security headers to all responses."""
+    \"""Middleware to add security headers to all responses.\"""
     
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -157,20 +159,29 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         
         # More permissive CSP for Swagger UI and ReDoc
         if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
+            swagger_cdn = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/"
             response.headers["Content-Security-Policy"] = (
-                "default-src 'self'; "
-                "img-src 'self' data: https:; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
-                "style-src 'self' 'unsafe-inline'; "
-                "frame-src 'self'; "
-                "connect-src 'self' https:;"
+                f"default-src 'self'; "
+                f"img-src 'self' data: {swagger_cdn}; "
+                f"script-src 'self' 'unsafe-inline' 'unsafe-eval' {swagger_cdn}; "
+                f"style-src 'self' 'unsafe-inline' {swagger_cdn}; "
+                f"frame-src 'self'; "
+                f"font-src 'self' data: {swagger_cdn}; "
+                f"connect-src 'self' https:;"
             )
         else:
-            response.headers["Content-Security-Policy"] = "default-src 'self'"
+            # Strict CSP for other routes
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "img-src 'self' data:; "
+                "script-src 'self'; "
+                "style-src 'self';"
+            )
             
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         
         return response
+"""
 
 class CacheControlMiddleware(BaseHTTPMiddleware):
     """Middleware to add cache control headers."""

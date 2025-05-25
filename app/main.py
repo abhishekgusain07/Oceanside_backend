@@ -4,6 +4,9 @@ Main FastAPI application factory.
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.openapi.utils import get_openapi
 import structlog
 import asyncio
 import signal
@@ -14,13 +17,6 @@ from typing import Dict, Any
 from app.api.router import api_router
 from app.core.config import settings
 from app.core.logging import configure_logging
-from app.core.middleware import (
-    RequestIdMiddleware,
-    RateLimitMiddleware,
-    SecurityHeadersMiddleware,
-    CacheControlMiddleware,
-    RequestTimingMiddleware
-)
 
 # Create a logger for this module
 logger = structlog.get_logger(__name__)
@@ -94,6 +90,21 @@ async def cleanup():
     # Add your cleanup tasks here
     active_requests.clear()
 
+def custom_openapi():
+    """Generate custom OpenAPI schema."""
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    openapi_schema = get_openapi(
+        title=settings.PROJECT_NAME,
+        version=settings.VERSION,
+        description=settings.PROJECT_DESCRIPTION,
+        routes=app.routes,
+    )
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
 def create_application() -> FastAPI:
     """
     Create and configure the FastAPI application.
@@ -103,35 +114,36 @@ def create_application() -> FastAPI:
     """
     configure_logging()
     
-    # Create FastAPI app
+    # Create FastAPI app with no automatic docs
     application = FastAPI(
         title=settings.PROJECT_NAME,
         description=settings.PROJECT_DESCRIPTION,
         version=settings.VERSION,
-        docs_url=settings.DOCS_URL,
-        redoc_url=settings.REDOC_URL,
-        openapi_url=settings.OPENAPI_URL,
-        lifespan=lifespan,
+        docs_url=None,  # Disable automatic docs
+        redoc_url=None,  # Disable automatic redoc
+        openapi_url="/openapi.json"
     )
     
-    # Add middleware in the correct order
-    application.add_middleware(RequestIdMiddleware)  # First to add request ID
-    application.add_middleware(RateLimitMiddleware)  # Then rate limiting
-    application.add_middleware(SecurityHeadersMiddleware)  # Then security headers
-    application.add_middleware(CacheControlMiddleware)  # Then cache control
-    application.add_middleware(RequestTimingMiddleware)  # Then request timing
-    
-    # Configure CORS
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.ALLOWED_ORIGINS,
+        allow_origins=["*"],  # More permissive for development
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    
     # Include API router
     application.include_router(api_router, prefix=settings.API_V1_STR)
+    
+    # Custom documentation endpoints
+    @application.get("/docs", include_in_schema=False)
+    async def custom_swagger_ui_html():
+        return get_swagger_ui_html(
+            openapi_url="/openapi.json",
+            title=f"{settings.PROJECT_NAME} - Swagger UI",
+            swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+            swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+            swagger_favicon_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/favicon-32x32.png",
+        )
     
     # Add health check endpoint
     @application.get("/health")
