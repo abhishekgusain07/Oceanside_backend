@@ -3,7 +3,7 @@ Application configuration management.
 """
 from typing import List, Optional, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import AnyHttpUrl, validator
+from pydantic import AnyHttpUrl, validator, computed_field
 import secrets
 from functools import lru_cache
 
@@ -40,6 +40,26 @@ class Settings(BaseSettings):
     
     # Database
     DATABASE_URL: str = "sqlite:///./app.db"
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: str = "5432"
+    POSTGRES_USER: str = "postgres"
+    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_DB: str = "fastapi_template"
+    DATABASE_ECHO: bool = False
+    
+    @computed_field
+    @property
+    def SQLALCHEMY_DATABASE_URI(self) -> str:
+        """Get the SQLAlchemy database URI."""
+        if self.DATABASE_URL and self.DATABASE_URL != "sqlite:///./app.db":
+            return self.DATABASE_URL
+        return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+    
+    @computed_field
+    @property
+    def TEST_SQLALCHEMY_DATABASE_URI(self) -> str:
+        """Get the test database URI."""
+        return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}_test"
     
     # Logging
     LOG_LEVEL: str = "INFO"

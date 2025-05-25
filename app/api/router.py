@@ -1,27 +1,16 @@
 """
-Main API router that includes all endpoint-specific routers.
+Main API router configuration.
 """
 from fastapi import APIRouter
 
-from app.api.endpoints import health, crewai, metrics
+from app.api.endpoints import health, metrics
 
 # Create the main API router
 api_router = APIRouter()
 
 # Include all endpoint routers
-api_router.include_router(
-    health.router, prefix="/health", tags=["health"]
-)
-
-# Include CrewAI router
-api_router.include_router(
-    crewai.router, prefix="/crewai", tags=["crewai"]
-)
-
-# Include metrics router
-api_router.include_router(
-    metrics.router, prefix="/metrics", tags=["metrics"]
-)
+api_router.include_router(health.router, prefix="/health", tags=["health"])
+api_router.include_router(metrics.router, prefix="/metrics", tags=["metrics"])
 
 # Add more endpoint routers here as needed
 # Example:

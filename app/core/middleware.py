@@ -108,12 +108,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     """Middleware to implement rate limiting."""
     
     async def dispatch(self, request: Request, call_next):
+        global rate_limit_store
         client_ip = request.client.host
         current_time = time.time()
         
         # Clean up old entries
-        rate_limit_store = {k: v for k, v in rate_limit_store.items() 
-                          if current_time - v[1] < RATE_LIMIT_WINDOW}
+        rate_limit_store = {
+            k: v for k, v in rate_limit_store.items() 
+            if current_time - v[1] < RATE_LIMIT_WINDOW
+        }
         
         # Check rate limit
         if client_ip in rate_limit_store:
@@ -127,7 +130,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         else:
             rate_limit_store[client_ip] = (1, current_time)
         
-        return await call_next(request)
+        response = await call_next(request)
+        
+        # Add rate limit headers
+        response.headers["X-RateLimit-Limit"] = str(MAX_REQUESTS)
+        response.headers["X-RateLimit-Remaining"] = str(
+            MAX_REQUESTS - rate_limit_store[client_ip][0]
+        )
+        response.headers["X-RateLimit-Reset"] = str(
+            int(rate_limit_store[client_ip][1] + RATE_LIMIT_WINDOW)
+        )
+        
+        return response
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Middleware to add security headers to all responses."""
@@ -140,7 +154,20 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-        response.headers["Content-Security-Policy"] = "default-src 'self'"
+        
+        # More permissive CSP for Swagger UI and ReDoc
+        if request.url.path in ["/docs", "/redoc", "/openapi.json"]:
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "img-src 'self' data: https:; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "style-src 'self' 'unsafe-inline'; "
+                "frame-src 'self'; "
+                "connect-src 'self' https:;"
+            )
+        else:
+            response.headers["Content-Security-Policy"] = "default-src 'self'"
+            
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         
         return response
