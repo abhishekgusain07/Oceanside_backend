@@ -134,7 +134,7 @@ def create_application() -> FastAPI:
     # Include API router
     application.include_router(api_router, prefix=settings.API_V1_STR)
     
-    # Custom documentation endpoints
+    # Custom documentation endpoints, all api routes
     @application.get("/docs", include_in_schema=False)
     async def custom_swagger_ui_html():
         return get_swagger_ui_html(
