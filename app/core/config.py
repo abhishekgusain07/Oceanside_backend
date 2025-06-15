@@ -3,9 +3,9 @@ Application configuration management.
 """
 from typing import List, Optional, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import AnyHttpUrl, validator, computed_field
+from pydantic import AnyHttpUrl, validator, computed_field, Field
 import secrets
-from functools import lru_cache
+from functools import lru_cacheb
 
 class Settings(BaseSettings):
     """
@@ -17,6 +17,63 @@ class Settings(BaseSettings):
     PROJECT_DESCRIPTION: str = "A modern FastAPI template with best practices"
     VERSION: str = "1.0.0"
     ENVIRONMENT: str = "development"
+
+
+    FRONTEND_URL: str = Field(
+        default="http://localhost:3000",
+        description="Base URL of the Next.js frontend application"
+    )
+    
+    # WebSocket URL for signaling
+    WEBSOCKET_URL: str = Field(
+        default="ws://localhost:8000",
+        description="Base WebSocket URL for signaling server"
+    )
+    
+    # Session configuration
+    MAX_SESSION_PARTICIPANTS: int = Field(
+        default=10,
+        description="Default maximum participants per session"
+    )
+    
+    # Recording configuration
+    RECORDING_CHUNK_DURATION_SECONDS: int = Field(
+        default=30,
+        description="Duration of each recording chunk in seconds"
+    )
+    
+    # Cloud storage settings (you'll need these for the upload URLs)
+    CLOUD_STORAGE_PROVIDER: str = Field(
+        default="s3",
+        description="Cloud storage provider (s3, gcs, etc.)"
+    )
+    
+    CLOUD_STORAGE_BUCKET: str = Field(
+        default="your-recordings-bucket",
+        description="Cloud storage bucket name"
+    )
+    
+    CLOUD_STORAGE_REGION: str = Field(
+        default="us-east-1",
+        description="Cloud storage region"
+    )
+    
+    # AWS S3 credentials (if using S3)
+    AWS_ACCESS_KEY_ID: Optional[str] = Field(
+        default=None,
+        description="AWS access key ID"
+    )
+    
+    AWS_SECRET_ACCESS_KEY: Optional[str] = Field(
+        default=None,
+        description="AWS secret access key"
+    )
+    
+    # Upload URL expiration
+    UPLOAD_URL_EXPIRATION_MINUTES: int = Field(
+        default=60,
+        description="How long upload URLs remain valid (in minutes)"
+    )
     
     # Security
     SECRET_KEY: str = secrets.token_urlsafe(32)
