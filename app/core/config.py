@@ -5,7 +5,7 @@ from typing import List, Optional, Union
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import AnyHttpUrl, validator, computed_field, Field
 import secrets
-from functools import lru_cacheb
+from functools import lru_cache
 
 class Settings(BaseSettings):
     """
