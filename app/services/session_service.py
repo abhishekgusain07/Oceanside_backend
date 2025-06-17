@@ -11,6 +11,12 @@ from app.schemas.session import (
     SessionStatus, 
     ParticipantStatus
 )
+from app.core.exceptions import (
+    SessionNotFoundError, 
+    SessionAccessError, 
+    SessionParticipantError, 
+    SessionCapacityError
+)
 from typing import Optional, List
 from datetime import datetime
 import uuid
@@ -90,14 +96,19 @@ class SessionService:
             ).where(Session.id == session_uuid)
             
             result = await self.db.execute(stmt)
-            return result.scalar_one_or_none()
+            session = result.scalar_one_or_none()
+            
+            if not session:
+                raise SessionNotFoundError(session_id)
+            
+            return session
             
         except ValueError:
             logger.warning(f"Invalid session ID format: {session_id}")
-            return None
+            raise SessionNotFoundError(session_id, "Invalid session ID format")
         except Exception as e:
             logger.error(f"Error fetching session {session_id}: {str(e)}")
-            return None
+            raise
     
     async def join_session(self, session_id: str, request: SessionJoinRequest) -> Optional[SessionParticipant]:
         """
@@ -115,13 +126,10 @@ class SessionService:
             
             # Check if session exists and is joinable
             session = await self.get_session_by_id(session_id)
-            if not session:
-                logger.warning(f"Session {session_id} not found")
-                return None
             
             if session.status not in [SessionStatus.CREATED, SessionStatus.ACTIVE]:
                 logger.warning(f"Session {session_id} is not joinable (status: {session.status})")
-                return None
+                raise SessionAccessError(session_id, request.user_id, "Session is not in a joinable state")
             
             # Check if user is already in the session
             existing_participant = await self._get_participant_in_session(
@@ -136,7 +144,7 @@ class SessionService:
                     return existing_participant
                 else:
                     logger.warning(f"User {request.user_id} already in session {session_id}")
-                    return existing_participant
+                    raise SessionParticipantError(session_id, request.user_id, "User is already in the session")
             
             # Check participant limit
             if session.max_participants:
@@ -144,7 +152,7 @@ class SessionService:
                                  if p.status == ParticipantStatus.JOINED])
                 if active_count >= session.max_participants:
                     logger.warning(f"Session {session_id} is at capacity")
-                    return None
+                    raise SessionCapacityError(session_id, session.max_participants)
             
             # Create new participant
             participant = SessionParticipant(
@@ -165,11 +173,11 @@ class SessionService:
             
         except ValueError:
             logger.warning(f"Invalid session ID format: {session_id}")
-            return None
+            raise SessionNotFoundError(session_id, "Invalid session ID format")
         except Exception as e:
             await self.db.rollback()
             logger.error(f"Error joining session {session_id}: {str(e)}")
-            return None
+            raise
     
     async def leave_session(self, session_id: str, user_id: str) -> bool:
         """
@@ -187,7 +195,8 @@ class SessionService:
             
             participant = await self._get_participant_in_session(session_uuid, user_id)
             if not participant:
-                return False
+                logger.warning(f"Participant {user_id} not found in session {session_id}")
+                raise SessionParticipantError(session_id, user_id, "Participant not found in session")
             
             participant.status = ParticipantStatus.LEFT
             participant.left_at = datetime.utcnow()
@@ -199,7 +208,7 @@ class SessionService:
         except Exception as e:
             await self.db.rollback()
             logger.error(f"Error leaving session {session_id}: {str(e)}")
-            return False
+            raise
     
     async def update_session_status(self, session_id: str, status: SessionStatus) -> bool:
         """
@@ -220,7 +229,8 @@ class SessionService:
             session = result.scalar_one_or_none()
             
             if not session:
-                return False
+                logger.warning(f"Session {session_id} not found for status update")
+                raise SessionNotFoundError(session_id)
             
             session.status = status
             if status == SessionStatus.ACTIVE and not session.started_at:
@@ -235,7 +245,7 @@ class SessionService:
         except Exception as e:
             await self.db.rollback()
             logger.error(f"Error updating session {session_id} status: {str(e)}")
-            return False
+            raise
     
     async def get_user_sessions(self, user_id: str, limit: int = 50) -> List[Session]:
         """
