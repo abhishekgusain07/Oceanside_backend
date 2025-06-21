@@ -275,6 +275,44 @@ class SessionService:
             logger.error(f"Error fetching sessions for user {user_id}: {str(e)}")
             return []
     
+    async def update_participant_status(self, participant_id: str, status: str) -> bool:
+        """
+        Update participant status by participant ID.
+        
+        Args:
+            participant_id: UUID string of the participant
+            status: New status (joined, left, disconnected)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            participant_uuid = uuid.UUID(participant_id)
+            
+            stmt = select(SessionParticipant).where(SessionParticipant.id == participant_uuid)
+            result = await self.db.execute(stmt)
+            participant = result.scalar_one_or_none()
+            
+            if not participant:
+                logger.warning(f"Participant {participant_id} not found for status update")
+                return False
+            
+            participant.status = status
+            if status == "left":
+                participant.left_at = datetime.utcnow()
+            elif status == "joined":
+                participant.joined_at = datetime.utcnow()
+                participant.left_at = None  # Clear left timestamp if rejoining
+            
+            await self.db.commit()
+            logger.info(f"Updated participant {participant_id} status to {status}")
+            return True
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Error updating participant {participant_id} status: {str(e)}")
+            return False
+
     async def _get_participant_in_session(
         self, session_id: uuid.UUID, user_id: str
     ) -> Optional[SessionParticipant]:

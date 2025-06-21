@@ -84,19 +84,33 @@ class WebSocketConnectionManager:
         """Background task to clean up stale connections."""
         while True:
             try:
-                await asyncio.sleep(30)  # Check every 30 seconds
+                await asyncio.sleep(15)  # Check every 15 seconds
                 stale_connections = []
                 
                 for connection in self.connections.values():
-                    if connection.is_stale():
+                    if connection.is_stale(timeout=30):  # Mark stale after 30 seconds
                         stale_connections.append(connection)
                 
                 for connection in stale_connections:
-                    logger.info(f"Cleaning up stale connection: {connection.connection_id}")
+                    logger.info(f"Cleaning up stale connection: {connection.connection_id} (participant: {connection.participant_id})")
                     await self._disconnect_internal(connection)
                     
             except Exception as e:
                 logger.error(f"Error in cleanup task: {e}")
+    
+    async def _update_participant_status(self, participant_id: str, status: str):
+        """Update participant status in database."""
+        try:
+            from app.services.session_service import SessionService
+            from app.core.database import async_session
+            
+            async with async_session() as db:
+                service = SessionService(db)
+                await service.update_participant_status(participant_id, status)
+                await db.commit()
+                
+        except Exception as e:
+            logger.error(f"Failed to update participant status: {e}")
     
     async def connect(
         self, 
@@ -196,6 +210,9 @@ class WebSocketConnectionManager:
         
         if connection.connection_id in self.connections:
             del self.connections[connection.connection_id]
+        
+        # Update participant status in database
+        await self._update_participant_status(connection.participant_id, "left")
         
         # Close WebSocket if still open
         try:
@@ -399,6 +416,7 @@ class WebSocketConnectionManager:
     
     async def _handle_heartbeat(self, connection: ParticipantConnection, message: dict):
         """Handle heartbeat message."""
+        connection.update_heartbeat()
         await connection.send_message({
             'type': MessageType.HEARTBEAT,
             'timestamp': datetime.utcnow().isoformat()
