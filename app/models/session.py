@@ -36,7 +36,7 @@ class SessionParticipant(Base):
     """
     Model for tracking participants in a session.
     """
-    __tablename__ = "session_participants"
+    __tablename__ = "participants"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
@@ -64,7 +64,7 @@ class SessionRecording(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     session_id = Column(UUID(as_uuid=True), ForeignKey("sessions.id", ondelete="CASCADE"), nullable=False)
-    participant_id = Column(UUID(as_uuid=True), ForeignKey("session_participants.id", ondelete="CASCADE"), nullable=False)
+    participant_id = Column(UUID(as_uuid=True), ForeignKey("participants.id", ondelete="CASCADE"), nullable=False)
     
     # File information
     chunk_number = Column(Integer, nullable=False)  # Sequential chunk number
