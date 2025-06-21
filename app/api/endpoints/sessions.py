@@ -1,7 +1,7 @@
 """
 Sessions endpoint for managing recording sessions.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.schemas.session import (
@@ -346,4 +346,96 @@ async def get_user_sessions(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve user sessions"
+        )
+
+
+@router.delete(
+    "/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a session",
+    description="Delete a recording session (only by the host)"
+)
+async def delete_session(
+    session_id: str,
+    user_id: str = Query(..., description="User ID of the requester (must be host)"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete a recording session.
+    
+    Only the host can delete a session. This will:
+    1. Set all participants to "left" status
+    2. Set session status to "ended"
+    3. Set ended_at timestamp
+    
+    Args:
+        session_id: UUID of the session to delete
+        user_id: ID of the user requesting deletion (must be host)
+        db: Database session dependency
+        
+    Raises:
+        HTTPException: If delete operation fails or user is not host
+    """
+    try:
+        service = SessionService(db)
+        success = await service.delete_session(session_id, user_id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Session not found or access denied"
+            )
+        
+        logger.info(f"Session {session_id} deleted by user {user_id}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete session {session_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete session"
+        )
+
+
+@router.post(
+    "/cleanup",
+    summary="Cleanup old sessions",
+    description="Manually trigger cleanup of old sessions (admin operation)"
+)
+async def cleanup_old_sessions(
+    days_old: int = Query(7, description="Sessions older than this many days will be cleaned up"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Manually trigger cleanup of old sessions.
+    
+    This will find sessions that are:
+    - Older than specified days
+    - Still in "created" or "active" status
+    - Set them to "ended" status
+    
+    Args:
+        days_old: Number of days to consider a session old (default 7)
+        db: Database session dependency
+        
+    Returns:
+        Dictionary with cleanup results
+    """
+    try:
+        service = SessionService(db)
+        cleanup_count = await service.cleanup_old_sessions(days_old)
+        
+        logger.info(f"Manual cleanup completed: {cleanup_count} sessions cleaned up")
+        return {
+            "message": f"Cleanup completed",
+            "sessions_cleaned": cleanup_count,
+            "days_threshold": days_old
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to cleanup old sessions: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to cleanup old sessions"
         )

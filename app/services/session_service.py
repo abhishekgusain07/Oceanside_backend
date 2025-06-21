@@ -18,7 +18,7 @@ from app.core.exceptions import (
     SessionCapacityError
 )
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 import logging
 
@@ -312,6 +312,95 @@ class SessionService:
             await self.db.rollback()
             logger.error(f"Error updating participant {participant_id} status: {str(e)}")
             return False
+
+    async def delete_session(self, session_id: str, user_id: str) -> bool:
+        """
+        Delete a session (only by the host).
+        
+        Args:
+            session_id: UUID string of the session
+            user_id: ID of the user requesting deletion (must be host)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            session_uuid = uuid.UUID(session_id)
+            
+            # Get session and verify ownership
+            session = await self.get_session_by_id(session_id)
+            if session.host_user_id != user_id:
+                logger.warning(f"User {user_id} attempted to delete session {session_id} but is not the host")
+                raise SessionAccessError(session_id, user_id, "Only the host can delete the session")
+            
+            # Update all participants to "left" status before deletion
+            for participant in session.participants:
+                participant.status = ParticipantStatus.LEFT
+                participant.left_at = datetime.utcnow()
+            
+            # Set session to ended
+            session.status = SessionStatus.ENDED
+            session.ended_at = datetime.utcnow()
+            
+            await self.db.commit()
+            logger.info(f"Session {session_id} deleted by host {user_id}")
+            return True
+            
+        except ValueError:
+            logger.warning(f"Invalid session ID format: {session_id}")
+            raise SessionNotFoundError(session_id, "Invalid session ID format")
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Error deleting session {session_id}: {str(e)}")
+            raise
+
+    async def cleanup_old_sessions(self, days_old: int = 7) -> int:
+        """
+        Clean up old sessions that are older than specified days.
+        
+        Args:
+            days_old: Number of days to consider a session old
+            
+        Returns:
+            Number of sessions cleaned up
+        """
+        try:
+            cutoff_date = datetime.utcnow() - timedelta(days=days_old)
+            
+            # Find old sessions that are still active or created
+            stmt = select(Session).where(
+                and_(
+                    Session.created_at < cutoff_date,
+                    Session.status.in_([SessionStatus.CREATED, SessionStatus.ACTIVE])
+                )
+            ).options(selectinload(Session.participants))
+            
+            result = await self.db.execute(stmt)
+            old_sessions = result.scalars().all()
+            
+            cleanup_count = 0
+            for session in old_sessions:
+                # Update all participants to "left" status
+                for participant in session.participants:
+                    if participant.status != ParticipantStatus.LEFT:
+                        participant.status = ParticipantStatus.LEFT
+                        participant.left_at = datetime.utcnow()
+                
+                # Set session to ended
+                session.status = SessionStatus.ENDED
+                session.ended_at = datetime.utcnow()
+                cleanup_count += 1
+                
+                logger.info(f"Auto-cleaned up old session: {session.id}")
+            
+            await self.db.commit()
+            logger.info(f"Cleaned up {cleanup_count} old sessions")
+            return cleanup_count
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Error cleaning up old sessions: {str(e)}")
+            return 0
 
     async def _get_participant_in_session(
         self, session_id: uuid.UUID, user_id: str

@@ -172,6 +172,7 @@ class WebSocketConnectionManager:
             {
                 "type": MessageType.PARTICIPANT_JOINED,
                 "participant_id": participant_id,
+                "session_participants": self.get_session_participants(session_id),
                 "timestamp": datetime.utcnow().isoformat()
             },
             exclude_connection=connection
@@ -194,6 +195,7 @@ class WebSocketConnectionManager:
             {
                 "type": MessageType.PARTICIPANT_LEFT,
                 "participant_id": connection.participant_id,
+                "session_participants": self.get_session_participants(connection.session_id),
                 "timestamp": datetime.utcnow().isoformat()
             }
         )

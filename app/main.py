@@ -14,12 +14,14 @@ import signal
 import time
 from contextlib import asynccontextmanager
 from typing import Dict, Any
+from datetime import datetime, timedelta
 
 from app.api.router import api_router
 from app.api.websockets import websocket_endpoint, websocket_manager
-from app.core.config import settings
+from app.core.config import settings, get_settings
 from app.core.logging import configure_logging
 from app.core.database import get_db
+from app.services.session_service import SessionService
 
 # Create a logger for this module
 logger = structlog.get_logger(__name__)
@@ -30,16 +32,45 @@ shutdown_event = asyncio.Event()
 # Track active requests
 active_requests: Dict[str, Any] = {}
 
+# Global task handle for cleanup
+cleanup_task = None
+
+async def periodic_session_cleanup():
+    """Background task to cleanup old sessions periodically."""
+    while True:
+        try:
+            # Wait 1 hour between cleanups
+            await asyncio.sleep(3600)
+            
+            logger.info("Starting periodic session cleanup...")
+            
+            # Use a new database session for cleanup
+            from app.core.database import async_session
+            async with async_session() as db:
+                service = SessionService(db)
+                cleanup_count = await service.cleanup_old_sessions(days_old=1)  # Cleanup sessions older than 1 day
+                
+                if cleanup_count > 0:
+                    logger.info(f"Periodic cleanup completed: {cleanup_count} sessions cleaned up")
+                else:
+                    logger.debug("Periodic cleanup completed: no sessions to clean up")
+                    
+        except Exception as e:
+            logger.error(f"Error in periodic cleanup task: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Lifespan context manager for the FastAPI application.
     Handles startup and shutdown events.
     """
+    global cleanup_task
+    
     # Startup
-    logger.info("Starting up application", 
-                version=settings.VERSION,
-                environment=settings.ENVIRONMENT)
+    logger.info("🚀 Starting Riverside backend...")
+    logger.info(f"Environment: {settings.ENVIRONMENT}")
+    logger.info(f"Debug mode: {settings.DEBUG}")
+    logger.info(f"CORS origins: {settings.ALLOWED_ORIGINS}")
     
     # Register signal handlers
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -48,11 +79,23 @@ async def lifespan(app: FastAPI):
             lambda s=sig: asyncio.create_task(handle_shutdown(s))
         )
     
+    # Start periodic cleanup task
+    cleanup_task = asyncio.create_task(periodic_session_cleanup())
+    logger.info("✅ Periodic session cleanup task started")
+    
     yield
     
     # Shutdown
-    logger.info("Shutting down application")
+    logger.info("🔄 Shutting down Riverside backend...")
     await handle_shutdown(signal.SIGTERM)
+    
+    # Cancel cleanup task
+    if cleanup_task:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            logger.info("✅ Cleanup task cancelled")
 
 async def handle_shutdown(sig: signal.Signals):
     """
@@ -165,6 +208,7 @@ def create_application() -> FastAPI:
         title=settings.PROJECT_NAME,
         description=settings.PROJECT_DESCRIPTION,
         version=settings.VERSION,
+        debug=settings.DEBUG,
         docs_url=None,  # Disable automatic docs
         redoc_url=None,  # Disable automatic redoc
         openapi_url="/openapi.json",

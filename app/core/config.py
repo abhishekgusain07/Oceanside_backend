@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     PROJECT_DESCRIPTION: str = "A modern FastAPI template with best practices"
     VERSION: str = "1.0.0"
     ENVIRONMENT: str = "development"
+    DEBUG: bool = Field(default=True, description="Enable debug mode")
 
 
     FRONTEND_URL: str = Field(
