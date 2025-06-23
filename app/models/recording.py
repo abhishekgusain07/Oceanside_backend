@@ -37,7 +37,15 @@ class Recording(Base):
     description = Column(Text, nullable=True)
     
     # Status tracking
-    status = Column(SQLEnum(RecordingStatus), default=RecordingStatus.CREATED, nullable=False)
+    status = Column(
+        SQLEnum(
+            RecordingStatus,
+            name="recordingstatus",
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],  # Store .value not .name
+        ),
+        default=RecordingStatus.CREATED,
+        nullable=False,
+    )
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

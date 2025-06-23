@@ -7,14 +7,7 @@ from datetime import datetime
 from enum import Enum
 
 from app.schemas.base import BaseSchema
-
-class RecordingStatus(str, Enum):
-    """Recording status enumeration."""
-    CREATED = "created"
-    ACTIVE = "active"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
+from app.models.recording import RecordingStatus   # ← single source of truth
 
 # Request Schemas
 class RecordingCreateRequest(BaseModel):

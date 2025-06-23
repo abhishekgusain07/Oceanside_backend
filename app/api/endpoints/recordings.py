@@ -60,12 +60,20 @@ async def create_recording(
         
         response = RecordingResponse(
             id=str(recording.id),
-            user_id=recording.host_user_id,  # Map from host_user_id to user_id
             room_id=recording.room_id,
+            host_user_id=recording.host_user_id,  # Correct field name
             title=recording.title,
+            description=recording.description,  # Required field
             status=recording.status,
+            created_at=recording.created_at,
+            started_at=recording.started_at,  # Required field
+            ended_at=recording.ended_at,  # Required field
+            processed_at=recording.processed_at,  # Required field
             video_url=recording.video_url,
-            created_at=recording.created_at
+            thumbnail_url=recording.thumbnail_url,  # Required field
+            duration_seconds=recording.duration_seconds,  # Required field
+            max_participants=recording.max_participants,  # Required field
+            processing_attempts=recording.processing_attempts  # Required field
         )
         
         logger.info(f"Created recording {response.id} with room_id {response.room_id} for user {recording_data.user_id}")
@@ -108,12 +116,20 @@ async def get_user_recordings(
         return [
             RecordingResponse(
                 id=str(recording.id),
-                user_id=recording.host_user_id,  # Map from host_user_id to user_id
                 room_id=recording.room_id,
+                host_user_id=recording.host_user_id,  # Correct field name
                 title=recording.title,
+                description=recording.description,  # Required field
                 status=recording.status,
+                created_at=recording.created_at,
+                started_at=recording.started_at,  # Required field
+                ended_at=recording.ended_at,  # Required field
+                processed_at=recording.processed_at,  # Required field
                 video_url=recording.video_url,
-                created_at=recording.created_at
+                thumbnail_url=recording.thumbnail_url,  # Required field
+                duration_seconds=recording.duration_seconds,  # Required field
+                max_participants=recording.max_participants,  # Required field
+                processing_attempts=recording.processing_attempts  # Required field
             )
             for recording in recordings
         ]

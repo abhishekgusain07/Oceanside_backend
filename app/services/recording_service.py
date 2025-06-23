@@ -43,7 +43,7 @@ class RecordingService:
                 host_user_id=request.user_id,
                 room_id=room_id,
                 title=request.title or "Untitled Recording",
-                status=RecordingStatus.CREATED
+                status='created'
             )
             
             self.db.add(recording)
