@@ -17,11 +17,11 @@ from typing import Dict, Any
 from datetime import datetime, timedelta
 
 from app.api.router import api_router
-from app.api.websockets import websocket_endpoint, websocket_manager
+from app.api.socketio_server import sio
 from app.core.config import settings, get_settings
 from app.core.logging import configure_logging
 from app.core.database import get_db
-from app.services.session_service import SessionService
+import socketio
 
 # Create a logger for this module
 logger = structlog.get_logger(__name__)
@@ -35,25 +35,22 @@ active_requests: Dict[str, Any] = {}
 # Global task handle for cleanup
 cleanup_task = None
 
-async def periodic_session_cleanup():
-    """Background task to cleanup old sessions periodically."""
+async def periodic_cleanup():
+    """Background task to cleanup old recordings periodically."""
     while True:
         try:
             # Wait 1 hour between cleanups
             await asyncio.sleep(3600)
             
-            logger.info("Starting periodic session cleanup...")
+            logger.info("Starting periodic recording cleanup...")
             
-            # Use a new database session for cleanup
-            from app.core.database import async_session
-            async with async_session() as db:
-                service = SessionService(db)
-                cleanup_count = await service.cleanup_old_sessions(days_old=1)  # Cleanup sessions older than 1 day
-                
-                if cleanup_count > 0:
-                    logger.info(f"Periodic cleanup completed: {cleanup_count} sessions cleaned up")
-                else:
-                    logger.debug("Periodic cleanup completed: no sessions to clean up")
+            # TODO: Implement recording cleanup when RecordingService is created
+            # from app.services.recording_service import RecordingService
+            # async with async_session() as db:
+            #     service = RecordingService(db)
+            #     cleanup_count = await service.cleanup_old_recordings(days_old=7)
+            
+            logger.debug("Periodic cleanup completed: cleanup not yet implemented")
                     
         except Exception as e:
             logger.error(f"Error in periodic cleanup task: {e}")
@@ -80,8 +77,8 @@ async def lifespan(app: FastAPI):
         )
     
     # Start periodic cleanup task
-    cleanup_task = asyncio.create_task(periodic_session_cleanup())
-    logger.info("✅ Periodic session cleanup task started")
+    cleanup_task = asyncio.create_task(periodic_cleanup())
+    logger.info("✅ Periodic cleanup task started")
     
     yield
     
@@ -134,65 +131,10 @@ async def cleanup():
     """Perform cleanup tasks before shutdown."""
     logger.info("Performing cleanup tasks...")
     
-    # Clean up WebSocket connections
-    for session_id in list(websocket_manager.sessions.keys()):
-        connections = list(websocket_manager.sessions[session_id])
-        for connection in connections:
-            await websocket_manager._disconnect_internal(connection)
-    
-    # Cancel cleanup task if running
-    if websocket_manager._cleanup_task:
-        websocket_manager._cleanup_task.cancel()
-        try:
-            await websocket_manager._cleanup_task
-        except asyncio.CancelledError:
-            pass
+    # TODO: Add Socket.IO cleanup when implemented
+    # Clean up Socket.IO connections
     
     active_requests.clear()
-
-def custom_openapi():
-    """Generate custom OpenAPI schema."""
-    if app.openapi_schema:
-        return app.openapi_schema
-    
-    openapi_schema = get_openapi(
-        title=settings.PROJECT_NAME,
-        version=settings.VERSION,
-        description=settings.PROJECT_DESCRIPTION,
-        routes=app.routes,
-    )
-    
-    # Add WebSocket documentation
-    openapi_schema["paths"]["/ws/{session_id}"] = {
-        "get": {
-            "summary": "WebSocket endpoint for session signaling",
-            "description": "Real-time communication endpoint for recording sessions",
-            "parameters": [
-                {
-                    "name": "session_id",
-                    "in": "path",
-                    "required": True,
-                    "schema": {"type": "string"},
-                    "description": "Unique identifier for the session"
-                },
-                {
-                    "name": "participant_id",
-                    "in": "query",
-                    "required": True,
-                    "schema": {"type": "string"},
-                    "description": "Unique identifier for the participant"
-                }
-            ],
-            "responses": {
-                "101": {"description": "WebSocket connection established"},
-                "404": {"description": "Session not found"},
-                "429": {"description": "Connection limit exceeded"}
-            }
-        }
-    }
-    
-    app.openapi_schema = openapi_schema
-    return app.openapi_schema
 
 def create_application() -> FastAPI:
     """
@@ -227,30 +169,8 @@ def create_application() -> FastAPI:
     # Include API router
     application.include_router(api_router, prefix=settings.API_V1_STR)
     
-    # Add WebSocket route with proper dependency injection
-    @application.websocket("/ws/{session_id}")
-    async def websocket_route(
-        websocket: WebSocket, 
-        session_id: str,
-        participant_id: str = Query(..., description="Unique identifier for the participant"),
-        db: AsyncSession = Depends(get_db)
-    ):
-        """
-        WebSocket route for session signaling.
-        
-        This route handles real-time communication for a specific session.
-        """
-        await websocket_endpoint(websocket, session_id, participant_id, db)
-    
-    # Add session WebSocket stats endpoint
-    @application.get("/api/v1/sessions/{session_id}/websocket-stats")
-    async def get_session_websocket_stats(session_id: str):
-        """Get WebSocket connection statistics for a session."""
-        stats = websocket_manager.get_session_stats(session_id)
-        return {
-            "session_id": session_id,
-            "websocket_stats": stats
-        }
+    # Integrate Socket.IO
+    logger.info("Setting up Socket.IO server")
     
     # Custom documentation endpoints
     @application.get("/docs", include_in_schema=False)
@@ -264,24 +184,33 @@ def create_application() -> FastAPI:
         )
     
     # Set custom OpenAPI schema
-    application.openapi = custom_openapi
-    
-    # Add health check endpoint with WebSocket stats
-    @application.get("/health")
-    async def health_check():
-        total_connections = sum(
-            len(connections) 
-            for connections in websocket_manager.sessions.values()
+    def custom_openapi():
+        """Generate custom OpenAPI schema."""
+        if application.openapi_schema:
+            return application.openapi_schema
+        
+        openapi_schema = get_openapi(
+            title=settings.PROJECT_NAME,
+            version=settings.VERSION,
+            description=settings.PROJECT_DESCRIPTION,
+            routes=application.routes,
         )
         
+        # TODO: Add Socket.IO documentation when implemented
+        
+        application.openapi_schema = openapi_schema
+        return application.openapi_schema
+    
+    application.openapi = custom_openapi
+    
+    # Add health check endpoint
+    @application.get("/health")
+    async def health_check():
         return {
             "status": "healthy",
             "version": settings.VERSION,
             "environment": settings.ENVIRONMENT,
-            "websocket_stats": {
-                "active_sessions": len(websocket_manager.sessions),
-                "total_connections": total_connections
-            }
+            "message": "Riverside backend is running"
         }
     
     # Add request tracking middleware
@@ -328,39 +257,43 @@ def create_application() -> FastAPI:
                            method=request.method)
                 del active_requests[request_id]
     
-    # Add WebSocket connection limit middleware (if needed)
+    # Add rate limiting middleware (if needed)
     @application.middleware("http")
-    async def websocket_rate_limit(request: Request, call_next):
+    async def rate_limit_middleware(request: Request, call_next):
         # You can implement rate limiting logic here if needed
         response = await call_next(request)
         return response
     
+    # Add global exception handler
+    @application.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        """Global exception handler for better error reporting."""
+        request_id = request.headers.get("X-Request-ID", "unknown")
+        
+        logger.error(
+            "Unhandled exception",
+            request_id=request_id,
+            path=request.url.path,
+            method=request.method,
+            error=str(exc),
+            exc_info=True
+        )
+        
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": "Internal server error",
+                "request_id": request_id
+            },
+            headers={"X-Request-ID": request_id}
+        )
+    
     logger.info("Application startup complete")
-    return application
+    
+    # Mount Socket.IO at /socket.io/ path (default)
+    socket_app = socketio.ASGIApp(sio, application)
+    
+    return socket_app
 
 # Create the app instance
-app = create_application()
-
-# Add a custom exception handler for WebSocket errors
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Global exception handler for better error reporting."""
-    request_id = request.headers.get("X-Request-ID", "unknown")
-    
-    logger.error(
-        "Unhandled exception",
-        request_id=request_id,
-        path=request.url.path,
-        method=request.method,
-        error=str(exc),
-        exc_info=True
-    )
-    
-    return JSONResponse(
-        status_code=500,
-        content={
-            "detail": "Internal server error",
-            "request_id": request_id
-        },
-        headers={"X-Request-ID": request_id}
-    )
+application = create_application()

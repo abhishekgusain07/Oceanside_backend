@@ -76,6 +76,12 @@ class Settings(BaseSettings):
         description="How long upload URLs remain valid (in minutes)"
     )
     
+    # Redis configuration for Celery
+    REDIS_URL: str = Field(
+        default="redis://localhost:6379/0",
+        description="Redis URL for Celery broker and result backend"
+    )
+    
     # Security
     SECRET_KEY: str = secrets.token_urlsafe(32)
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
