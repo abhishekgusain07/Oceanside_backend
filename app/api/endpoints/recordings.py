@@ -353,12 +353,10 @@ async def get_turn_credentials():
         TURN server configuration including URL, username, and credential
     """
     try:
-        # TODO: Add actual TURN server configuration from environment variables
-        # For now, return a placeholder response
         return {
-            "urls": f"turn:{settings.TURN_SERVER_URL}:3478" if hasattr(settings, 'TURN_SERVER_URL') else "turn:localhost:3478",
-            "username": getattr(settings, 'TURN_SERVER_USERNAME', 'username'),
-            "credential": getattr(settings, 'TURN_SERVER_CREDENTIAL', 'credential')
+            "urls": f"turn:{settings.TURN_SERVER_URL}",
+            "username": settings.TURN_SERVER_USERNAME,
+            "credential": settings.TURN_SERVER_CREDENTIAL
         }
         
     except Exception as e:

@@ -110,6 +110,10 @@ class Settings(BaseSettings):
     POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "fastapi_template"
     DATABASE_ECHO: bool = False
+
+    TURN_SERVER_URL: str = "relay1.expressturn.com:3480"
+    TURN_SERVER_USERNAME: str = "000000002066064322"
+    TURN_SERVER_CREDENTIAL: str = "WmntrHEmhe1gxXsKPOygktWz3+s="
     
     @computed_field
     @property
