@@ -376,6 +376,7 @@ async def delete_session(
     Raises:
         HTTPException: If delete operation fails or user is not host
     """
+    print(f"Deleting session {session_id} for user {user_id}")
     try:
         service = SessionService(db)
         success = await service.delete_session(session_id, user_id)
