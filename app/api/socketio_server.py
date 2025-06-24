@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 sio = socketio.AsyncServer(
     cors_allowed_origins="*",  # Configure based on your needs
     logger=True,
+    async_mode='asgi',
     engineio_logger=True
 )
 

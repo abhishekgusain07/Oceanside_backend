@@ -13,8 +13,8 @@ psutil>=5.9.8
 python-multipart>=0.0.6
 
 # Socket.IO for real-time communication
-python-socketio>=5.11.0
-python-engineio>=4.9.0
+python-socketio==5.10.0
+python-engineio==4.9.1
 
 # Celery for background task processing
 celery>=5.3.0

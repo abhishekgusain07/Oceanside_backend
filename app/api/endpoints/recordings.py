@@ -88,6 +88,67 @@ async def create_recording(
 
 
 @router.get(
+    "/{room_id}",
+    response_model=RecordingResponse,
+    summary="Get recording by room ID",
+    description="Retrieve a specific recording by its room ID"
+)
+async def get_recording(
+    room_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get a recording by room ID.
+    
+    Args:
+        room_id: Room ID of the recording
+        db: Database session dependency
+        
+    Returns:
+        RecordingResponse: Recording details
+        
+    Raises:
+        HTTPException: If recording not found
+    """
+    try:
+        service = RecordingService(db)
+        recording = await service.get_recording_by_room_id(room_id)
+        
+        if not recording:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Recording not found"
+            )
+        
+        return RecordingResponse(
+            id=str(recording.id),
+            room_id=recording.room_id,
+            host_user_id=recording.host_user_id,
+            title=recording.title,
+            description=recording.description,
+            status=recording.status,
+            created_at=recording.created_at,
+            started_at=recording.started_at,
+            ended_at=recording.ended_at,
+            processed_at=recording.processed_at,
+            video_url=recording.video_url,
+            thumbnail_url=recording.thumbnail_url,
+            duration_seconds=recording.duration_seconds,
+            max_participants=recording.max_participants,
+            processing_attempts=recording.processing_attempts
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get recording {room_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to retrieve recording"
+        )
+
+
+@router.get(
     "",
     response_model=List[RecordingResponse],
     summary="Get user's recordings",
