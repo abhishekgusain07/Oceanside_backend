@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     
     # Recording configuration
     RECORDING_CHUNK_DURATION_SECONDS: int = Field(
-        default=30,
+        default=5,
         description="Duration of each recording chunk in seconds"
     )
     

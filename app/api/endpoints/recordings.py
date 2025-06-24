@@ -18,11 +18,103 @@ import logging
 import os
 import tempfile
 import uuid
+import json
+import aiofiles
 
 logger = logging.getLogger(__name__)
 
 # Create router for recordings
 router = APIRouter()
+
+
+async def update_metadata_file(room_id: str, user_type: str, chunk_name: str, start_time: float, end_time: float):
+    """
+    Update metadata file for later reconstruction of the recording.
+    
+    This function maintains a simple text file that tracks all uploaded chunks
+    with their timing information, enabling proper reconstruction of the final video.
+    
+    Args:
+        room_id: Room ID of the recording
+        user_type: Type of user ("host" or "guest") 
+        chunk_name: Name of the uploaded chunk file
+        start_time: Start time of the chunk in seconds
+        end_time: End time of the chunk in seconds
+    """
+    try:
+        metadata_file_name = f"{user_type}.txt"
+        
+        # Local paths
+        metadata_dir = f"uploads/recordings/{room_id}/{user_type}"
+        os.makedirs(metadata_dir, exist_ok=True)
+        local_metadata_path = os.path.join(metadata_dir, metadata_file_name)
+        
+        # Cloudinary path for future use
+        cloudinary_metadata_path = f"recordings/{room_id}/{user_type}/{metadata_file_name}"
+        
+        # Get existing metadata content
+        existing_txt = ""
+        
+        # TODO: Cloudinary fetch (commented for now)
+        # try:
+        #     import cloudinary
+        #     # Get existing metadata from Cloudinary
+        #     metadata_url = cloudinary.CloudinaryImage(cloudinary_metadata_path).build_url(resource_type="raw")
+        #     import httpx
+        #     async with httpx.AsyncClient() as client:
+        #         response = await client.get(metadata_url)
+        #         if response.status_code == 200:
+        #             existing_txt = response.text
+        # except Exception as e:
+        #     logger.info(f"No existing metadata file in Cloudinary, creating new one: {e}")
+        
+        # For now, read from local file if exists
+        if os.path.exists(local_metadata_path):
+            async with aiofiles.open(local_metadata_path, 'r') as f:
+                existing_txt = await f.read()
+        else:
+            logger.info(f"No existing local metadata file, creating new one")
+        
+        # Append new chunk info in CSV format: chunkName,startTime,endTime
+        updated_txt = existing_txt + f"{chunk_name},{start_time},{end_time}\n"
+        
+        # Save updated metadata locally
+        async with aiofiles.open(local_metadata_path, 'w') as f:
+            await f.write(updated_txt)
+        
+        # TODO: Cloudinary upload (commented for now)
+        # try:
+        #     import cloudinary.uploader
+        #     # Create temporary file for Cloudinary upload
+        #     import time
+        #     tmp_filename = f"{user_type}_{room_id}_{int(time.time() * 1000)}.txt"
+        #     tmp_path = os.path.join(tempfile.gettempdir(), tmp_filename)
+        #     
+        #     # Write to temp file
+        #     with open(tmp_path, 'w') as tmp_file:
+        #         tmp_file.write(updated_txt)
+        #     
+        #     # Upload to Cloudinary
+        #     result = cloudinary.uploader.upload(
+        #         tmp_path,
+        #         resource_type="raw",
+        #         public_id=cloudinary_metadata_path,
+        #         overwrite=True
+        #     )
+        #     
+        #     # Clean up temp file
+        #     os.unlink(tmp_path)
+        #     
+        #     logger.info(f"✅ Metadata file uploaded to Cloudinary: {result.get('url')}")
+        # except Exception as cloudinary_error:
+        #     logger.error(f"Failed to upload metadata to Cloudinary: {cloudinary_error}")
+        #     # Continue with local storage even if Cloudinary fails
+        
+        logger.info(f"✅ Updated metadata for {user_type} in room {room_id}: {chunk_name} ({start_time}-{end_time}s)")
+        
+    except Exception as e:
+        logger.error(f"Failed to update metadata file for room {room_id}, user {user_type}: {str(e)}")
+        # Don't raise exception to avoid breaking the upload process
 
 
 @router.post(
@@ -300,21 +392,21 @@ async def upload_chunk(
     file: UploadFile = File(...),
     room_id: str = Form(...),
     user_type: str = Form(...),  # "host" or "guest"
-    start_time: float = Form(...),
-    end_time: float = Form(...),
+    chunk_index: int = Form(...),
+    start_time: float = Form(None),  # Optional for backwards compatibility
+    end_time: float = Form(None),    # Optional for backwards compatibility
 ):
     """
     Upload a recording chunk.
     
     This endpoint receives recording chunks from the frontend and stores them
-    temporarily before they are processed by the Celery worker.
+    locally (and optionally to Cloudinary).
     
     Args:
         file: The uploaded chunk file
         room_id: Room ID for the recording
         user_type: Type of user ("host" or "guest")
-        start_time: Start time of the chunk
-        end_time: End time of the chunk
+        chunk_index: Index of the chunk for ordering
         
     Returns:
         Success message
@@ -323,27 +415,61 @@ async def upload_chunk(
         HTTPException: If upload fails
     """
     try:
+        # Get the original filename from the uploaded file
+        chunk_name = file.filename or f"chunk_{chunk_index}.webm"
+        
         # Create uploads directory if it doesn't exist
-        upload_dir = f"uploads/{room_id}/{user_type}"
+        upload_dir = f"uploads/recordings/{room_id}/{user_type}"
         os.makedirs(upload_dir, exist_ok=True)
         
-        # Generate unique filename
-        filename = f"chunk_{int(start_time)}_{int(end_time)}_{uuid.uuid4().hex[:8]}.webm"
-        file_path = os.path.join(upload_dir, filename)
+        # Save file locally
+        file_path = os.path.join(upload_dir, chunk_name)
+        content = await file.read()
         
-        # Save the file
         with open(file_path, "wb") as buffer:
-            content = await file.read()
             buffer.write(content)
         
-        logger.info(f"Uploaded chunk {filename} for room {room_id}, user_type {user_type}")
+        logger.info(f"✅ Chunk {chunk_name} saved locally for room {room_id}, user_type {user_type}")
+        
+        # TODO: Cloudinary upload (commented for now)
+        # cloudinary_chunk_path = f"recordings/{room_id}/{user_type}/{chunk_name}"
+        # try:
+        #     import cloudinary
+        #     import cloudinary.uploader
+        #     
+        #     # Upload to Cloudinary
+        #     result = cloudinary.uploader.upload(
+        #         content,
+        #         resource_type="video",
+        #         public_id=cloudinary_chunk_path,
+        #         use_filename=True,
+        #         unique_filename=False,
+        #         overwrite=True,
+        #         timeout=60000
+        #     )
+        #     logger.info(f"✅ Chunk {chunk_name} uploaded to Cloudinary: {result.get('url')}")
+        # except Exception as cloudinary_error:
+        #     logger.error(f"Cloudinary upload failed for {chunk_name}: {cloudinary_error}")
+        #     # Continue with local storage even if Cloudinary fails
+        
+        # Update metadata file for later reconstruction
+        # Calculate start/end times if not provided (based on chunk index)
+        if start_time is None:
+            start_time = chunk_index * 1.0  # Assume 1-second chunks
+        if end_time is None:
+            end_time = (chunk_index + 1) * 1.0
+            
+        await update_metadata_file(room_id, user_type, chunk_name, start_time, end_time)
         
         return {
             "message": "Chunk uploaded successfully",
-            "filename": filename,
+            "filename": chunk_name,
             "size": len(content),
+            "chunk_index": chunk_index,
             "start_time": start_time,
-            "end_time": end_time
+            "end_time": end_time,
+            "local_path": file_path
+            # "cloudinary_url": result.get('url') if cloudinary upload enabled
         }
         
     except Exception as e:
