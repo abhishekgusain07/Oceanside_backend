@@ -75,9 +75,14 @@ async def join_room(sid, room_id):
         # Join the Socket.IO room
         await sio.enter_room(sid, room_id)
         
-        # Get room info to count clients
-        room_info = sio.manager.get_participants(sio.namespace, room_id)
-        num_clients = len(room_info) if room_info else 0
+        # Get room info to count clients - use default namespace '/'
+        try:
+            room_info = sio.manager.get_participants('/', room_id)
+            # Convert generator to list to get length
+            num_clients = len(list(room_info)) if room_info else 0
+        except Exception as room_error:
+            logger.warning(f"Could not get room participants, defaulting to 1: {room_error}")
+            num_clients = 1  # Default to treating as first client
         
         logger.info(f"Socket {sid} joined room {room_id}. Clients in room: {num_clients}")
         
