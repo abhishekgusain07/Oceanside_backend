@@ -13,8 +13,7 @@ celery_app = Celery(
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
     include=[
-        "app.tasks.video_processing",
-        "app.tasks.cleanup_tasks"
+        "app.tasks.video_processing"
     ]
 )
 
@@ -38,7 +37,6 @@ celery_app.conf.update(
     # Task routing
     task_routes={
         "app.tasks.video_processing.process_video": {"queue": "video_processing"},
-        "app.tasks.cleanup_tasks.cleanup_old_recordings": {"queue": "cleanup"},
     },
     
     # Task priorities
@@ -62,10 +60,6 @@ celery_app.conf.task_annotations = {
         "soft_time_limit": 1500,  # 25 minutes soft limit
         "max_retries": 3,
         "default_retry_delay": 300,  # 5 minutes
-    },
-    "app.tasks.cleanup_tasks.cleanup_old_recordings": {
-        "rate_limit": "1/h",   # Max 1 cleanup task per hour
-        "time_limit": 600,     # 10 minutes max
     }
 }
 

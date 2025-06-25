@@ -64,7 +64,7 @@ async def process_video_async(room_id: str, recording_id: str, user_id: str) -> 
         logger.info(f"Processing videos in temp directory: {temp_dir}")
         
         # Find uploaded chunks for this room
-        uploads_dir = f"uploads/{room_id}"
+        uploads_dir = f"uploads/recordings/{room_id}"
         if not os.path.exists(uploads_dir):
             raise FileNotFoundError(f"No uploads found for room {room_id}")
         
@@ -139,7 +139,9 @@ async def concat_chunks(chunks_dir: str, temp_dir: str, user_type: str) -> Optio
         concat_list_path = os.path.join(temp_dir, f"{user_type}_concat_list.txt")
         with open(concat_list_path, 'w') as f:
             for chunk_file in chunk_files:
-                f.write(f"file '{chunk_file}'\n")
+                # Use absolute path to ensure FFmpeg can find the files
+                abs_chunk_file = os.path.abspath(chunk_file)
+                f.write(f"file '{abs_chunk_file}'\n")
         
         # Output path
         output_path = os.path.join(temp_dir, f"{user_type}_full.mp4")
