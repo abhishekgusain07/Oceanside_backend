@@ -9,6 +9,7 @@ from typing import Dict, Any
 import structlog
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 from app.api.dependencies import get_session
 from app.core.config import settings
@@ -55,10 +56,11 @@ class HealthService:
         # Check database connection if session is available
         if self.session:
             try:
-                # Execute a simple query
-                result = await self.session.execute("SELECT 1")
-                await result.first()
+                # Execute a simple query using text() for SQLAlchemy 2.0+
+                result = await self.session.execute(text("SELECT 1"))
+                result.fetchone()  # fetchone() is not async, don't await it
                 health_info["database_status"] = "healthy"
+                logger.debug("Database health check passed")
             except Exception as e:
                 logger.error("Database health check failed", exc_info=e)
                 health_info["database_status"] = "unhealthy"
