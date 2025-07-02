@@ -24,6 +24,10 @@ redis>=5.0.0
 # Video processing
 ffmpeg-python>=0.2.0
 
+# Cloud storage (R2/S3 support)
+boto3>=1.34.70
+botocore>=1.34.70
+
 # Development dependencies
 pytest>=7.4.2
 pytest-asyncio>=0.21.1

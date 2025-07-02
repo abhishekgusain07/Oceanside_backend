@@ -23,14 +23,14 @@ logger = logging.getLogger(__name__)
 @celery_app.task(bind=True, name="app.tasks.video_processing.process_video")
 def process_video(self, room_id: str, recording_id: str = "", user_id: str = ""):
     """
-    Process video recordings by merging uploaded chunks.
+    Process video recordings by merging uploaded chunks from R2 storage.
     
-    This matches the Node.js implementation:
-    1. Find uploaded chunks for the room
+    This matches the Node.js implementation but downloads chunks from R2:
+    1. Download uploaded chunks for the room from R2
     2. Concatenate host chunks into a single video
     3. Concatenate guest chunks into a single video (if any)
     4. Merge host and guest videos side-by-side
-    5. Upload final video and update database
+    5. Upload final video back to R2 and update database
     
     Args:
         room_id: Room ID of the recording
@@ -41,7 +41,7 @@ def process_video(self, room_id: str, recording_id: str = "", user_id: str = "")
     
     try:
         # Use asyncio to run the async processing function
-        return asyncio.run(process_video_async(room_id, recording_id, user_id))
+        return asyncio.run(process_video_async_r2(room_id, recording_id, user_id))
         
     except Exception as e:
         logger.error(f"Video processing failed for room {room_id}: {str(e)}", exc_info=True)
@@ -56,29 +56,86 @@ def process_video(self, room_id: str, recording_id: str = "", user_id: str = "")
         raise
 
 
-async def process_video_async(room_id: str, recording_id: str, user_id: str) -> Dict:
-    """Async video processing function."""
+# COMMENTED OUT - OLD LOCAL STORAGE METHOD
+# async def process_video_async(room_id: str, recording_id: str, user_id: str) -> Dict:
+#     """Async video processing function."""
+#     
+#     # Create temporary directory for processing
+#     with tempfile.TemporaryDirectory() as temp_dir:
+#         logger.info(f"Processing videos in temp directory: {temp_dir}")
+#         
+#         # Find uploaded chunks for this room
+#         uploads_dir = f"uploads/recordings/{room_id}"
+#         if not os.path.exists(uploads_dir):
+#             raise FileNotFoundError(f"No uploads found for room {room_id}")
+#         
+#         # Process host chunks
+#         host_chunks_dir = os.path.join(uploads_dir, "host")
+#         host_video_path = None
+#         if os.path.exists(host_chunks_dir):
+#             host_video_path = await concat_chunks(host_chunks_dir, temp_dir, "host")
+#         
+#         # Process guest chunks
+#         guest_chunks_dir = os.path.join(uploads_dir, "guest")
+#         guest_video_path = None
+#         if os.path.exists(guest_chunks_dir):
+#             guest_video_path = await concat_chunks(guest_chunks_dir, temp_dir, "guest")
+#         
+#         if not host_video_path:
+#             raise ValueError("No host video found - cannot process recording")
+#         
+#         # If no guest video, create a black placeholder
+#         if not guest_video_path:
+#             logger.info("No guest video found, creating black placeholder")
+#             guest_video_path = await create_black_video(host_video_path, temp_dir)
+#         
+#         # Merge host and guest videos side by side
+#         final_video_path = await merge_side_by_side(host_video_path, guest_video_path, temp_dir)
+#         
+#         # TODO: Upload to cloud storage (placeholder for now)
+#         # In production, you would upload to S3, GCS, Cloudinary, etc.
+#         video_url = f"/processed/{room_id}/final_video.mp4"
+#         
+#         # Move final video to a permanent location (placeholder)
+#         processed_dir = f"processed/{room_id}"
+#         os.makedirs(processed_dir, exist_ok=True)
+#         final_destination = os.path.join(processed_dir, "final_video.mp4")
+#         os.rename(final_video_path, final_destination)
+#         
+#         logger.info(f"Final video saved to: {final_destination}")
+#         
+#         # Update database with the final video URL
+#         await update_recording_status(room_id, RecordingStatus.COMPLETED, video_url)
+#         
+#         # Clean up uploads directory
+#         try:
+#             import shutil
+#             shutil.rmtree(uploads_dir)
+#             logger.info(f"Cleaned up uploads directory: {uploads_dir}")
+#         except Exception as e:
+#             logger.warning(f"Failed to clean up uploads directory: {str(e)}")
+#         
+#         return {
+#             "room_id": room_id,
+#             "video_url": video_url,
+#             "status": "completed"
+#         }
+
+
+async def process_video_async_r2(room_id: str, recording_id: str, user_id: str) -> Dict:
+    """Async video processing function that downloads chunks from R2 storage."""
     
     # Create temporary directory for processing
     with tempfile.TemporaryDirectory() as temp_dir:
         logger.info(f"Processing videos in temp directory: {temp_dir}")
         
-        # Find uploaded chunks for this room
-        uploads_dir = f"uploads/recordings/{room_id}"
-        if not os.path.exists(uploads_dir):
-            raise FileNotFoundError(f"No uploads found for room {room_id}")
+        from app.services.r2_storage import r2_storage
         
-        # Process host chunks
-        host_chunks_dir = os.path.join(uploads_dir, "host")
-        host_video_path = None
-        if os.path.exists(host_chunks_dir):
-            host_video_path = await concat_chunks(host_chunks_dir, temp_dir, "host")
+        # Download host chunks from R2
+        host_video_path = await download_and_concat_chunks_r2(r2_storage, room_id, "host", temp_dir)
         
-        # Process guest chunks
-        guest_chunks_dir = os.path.join(uploads_dir, "guest")
-        guest_video_path = None
-        if os.path.exists(guest_chunks_dir):
-            guest_video_path = await concat_chunks(guest_chunks_dir, temp_dir, "guest")
+        # Download guest chunks from R2
+        guest_video_path = await download_and_concat_chunks_r2(r2_storage, room_id, "guest", temp_dir)
         
         if not host_video_path:
             raise ValueError("No host video found - cannot process recording")
@@ -91,28 +148,23 @@ async def process_video_async(room_id: str, recording_id: str, user_id: str) -> 
         # Merge host and guest videos side by side
         final_video_path = await merge_side_by_side(host_video_path, guest_video_path, temp_dir)
         
-        # TODO: Upload to cloud storage (placeholder for now)
-        # In production, you would upload to S3, GCS, Cloudinary, etc.
-        video_url = f"/processed/{room_id}/final_video.mp4"
+        # Upload final video to R2
+        video_url = await r2_storage.upload_final_video(final_video_path, room_id)
         
-        # Move final video to a permanent location (placeholder)
-        processed_dir = f"processed/{room_id}"
-        os.makedirs(processed_dir, exist_ok=True)
-        final_destination = os.path.join(processed_dir, "final_video.mp4")
-        os.rename(final_video_path, final_destination)
+        if not video_url:
+            raise ValueError("Failed to upload final video to R2")
         
-        logger.info(f"Final video saved to: {final_destination}")
+        logger.info(f"Final video uploaded to R2: {video_url}")
         
         # Update database with the final video URL
         await update_recording_status(room_id, RecordingStatus.COMPLETED, video_url)
         
-        # Clean up uploads directory
+        # Clean up chunks from R2 storage
         try:
-            import shutil
-            shutil.rmtree(uploads_dir)
-            logger.info(f"Cleaned up uploads directory: {uploads_dir}")
+            await r2_storage.cleanup_chunks(room_id)
+            logger.info(f"Cleaned up R2 chunks for room: {room_id}")
         except Exception as e:
-            logger.warning(f"Failed to clean up uploads directory: {str(e)}")
+            logger.warning(f"Failed to clean up R2 chunks: {str(e)}")
         
         return {
             "room_id": room_id,
@@ -121,19 +173,58 @@ async def process_video_async(room_id: str, recording_id: str, user_id: str) -> 
         }
 
 
-async def concat_chunks(chunks_dir: str, temp_dir: str, user_type: str) -> Optional[str]:
-    """Concatenate video chunks for a user type (host/guest)."""
+async def download_and_concat_chunks_r2(r2_storage, room_id: str, user_type: str, temp_dir: str) -> Optional[str]:
+    """Download chunks from R2 and concatenate them for a user type (host/guest)."""
     try:
-        # Find all chunk files
-        chunk_files = glob.glob(os.path.join(chunks_dir, "*.webm"))
-        if not chunk_files:
-            logger.warning(f"No chunk files found in {chunks_dir}")
+        # List all chunks for this user type from R2
+        chunk_keys = await r2_storage.list_chunks(room_id, user_type)
+        
+        if not chunk_keys:
+            logger.warning(f"No chunk files found in R2 for room {room_id}, user {user_type}")
             return None
         
         # Sort chunks by filename (assuming they contain timestamps or sequence numbers)
+        chunk_keys.sort()
+        
+        logger.info(f"Found {len(chunk_keys)} chunks in R2 for {user_type}")
+        
+        # Create local directory for downloaded chunks
+        local_chunks_dir = os.path.join(temp_dir, f"{user_type}_chunks")
+        os.makedirs(local_chunks_dir, exist_ok=True)
+        
+        # Download all chunks from R2
+        local_chunk_files = []
+        for chunk_key in chunk_keys:
+            # Extract filename from R2 key
+            chunk_filename = os.path.basename(chunk_key)
+            local_chunk_path = os.path.join(local_chunks_dir, chunk_filename)
+            
+            # Download chunk from R2
+            success = await r2_storage.download_chunk(chunk_key, local_chunk_path)
+            if success:
+                local_chunk_files.append(local_chunk_path)
+            else:
+                logger.error(f"Failed to download chunk: {chunk_key}")
+        
+        if not local_chunk_files:
+            logger.error(f"No chunks were successfully downloaded for {user_type}")
+            return None
+        
+        # Now concatenate the downloaded chunks
+        return await concat_chunks_from_files(local_chunk_files, temp_dir, user_type)
+        
+    except Exception as e:
+        logger.error(f"Error downloading and concatenating chunks for {user_type}: {str(e)}")
+        return None
+
+
+async def concat_chunks_from_files(chunk_files: List[str], temp_dir: str, user_type: str) -> Optional[str]:
+    """Concatenate video chunks from a list of local files."""
+    try:
+        # Sort chunks by filename (assuming they contain timestamps or sequence numbers)
         chunk_files.sort()
         
-        logger.info(f"Found {len(chunk_files)} chunks for {user_type}")
+        logger.info(f"Concatenating {len(chunk_files)} chunks for {user_type}")
         
         # Create concat list file
         concat_list_path = os.path.join(temp_dir, f"{user_type}_concat_list.txt")
@@ -169,6 +260,57 @@ async def concat_chunks(chunks_dir: str, temp_dir: str, user_type: str) -> Optio
     except Exception as e:
         logger.error(f"Error concatenating chunks for {user_type}: {str(e)}")
         return None
+
+
+# COMMENTED OUT - OLD LOCAL STORAGE METHOD
+# async def concat_chunks(chunks_dir: str, temp_dir: str, user_type: str) -> Optional[str]:
+#     """Concatenate video chunks for a user type (host/guest)."""
+#     try:
+#         # Find all chunk files
+#         chunk_files = glob.glob(os.path.join(chunks_dir, "*.webm"))
+#         if not chunk_files:
+#             logger.warning(f"No chunk files found in {chunks_dir}")
+#             return None
+#         
+#         # Sort chunks by filename (assuming they contain timestamps or sequence numbers)
+#         chunk_files.sort()
+#         
+#         logger.info(f"Found {len(chunk_files)} chunks for {user_type}")
+#         
+#         # Create concat list file
+#         concat_list_path = os.path.join(temp_dir, f"{user_type}_concat_list.txt")
+#         with open(concat_list_path, 'w') as f:
+#             for chunk_file in chunk_files:
+#                 # Use absolute path to ensure FFmpeg can find the files
+#                 abs_chunk_file = os.path.abspath(chunk_file)
+#                 f.write(f"file '{abs_chunk_file}'\n")
+#         
+#         # Output path
+#         output_path = os.path.join(temp_dir, f"{user_type}_full.mp4")
+#         
+#         # Use ffmpeg to concatenate
+#         cmd = [
+#             "ffmpeg", "-y",
+#             "-f", "concat",
+#             "-safe", "0",
+#             "-i", concat_list_path,
+#             "-c", "copy",
+#             output_path
+#         ]
+#         
+#         logger.info(f"Running ffmpeg command: {' '.join(cmd)}")
+#         result = subprocess.run(cmd, capture_output=True, text=True)
+#         
+#         if result.returncode != 0:
+#             logger.error(f"FFmpeg error: {result.stderr}")
+#             raise RuntimeError(f"FFmpeg concatenation failed: {result.stderr}")
+#         
+#         logger.info(f"Successfully concatenated {user_type} chunks to: {output_path}")
+#         return output_path
+#         
+#     except Exception as e:
+#         logger.error(f"Error concatenating chunks for {user_type}: {str(e)}")
+#         return None
 
 
 async def create_black_video(reference_video_path: str, temp_dir: str) -> str:

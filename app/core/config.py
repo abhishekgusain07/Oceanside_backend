@@ -70,6 +70,37 @@ class Settings(BaseSettings):
         description="AWS secret access key"
     )
     
+    # Cloudflare R2 storage configuration
+    R2_ACCESS_KEY_ID: Optional[str] = Field(
+        default=None,
+        description="Cloudflare R2 access key ID"
+    )
+    
+    R2_SECRET_ACCESS_KEY: Optional[str] = Field(
+        default=None,
+        description="Cloudflare R2 secret access key"
+    )
+    
+    R2_BUCKET_NAME: str = Field(
+        default="riversideuploads",
+        description="Cloudflare R2 bucket name"
+    )
+    
+    R2_ENDPOINT_URL: Optional[str] = Field(
+        default=None,
+        description="Cloudflare R2 endpoint URL (e.g., https://abc123.r2.cloudflarestorage.com)"
+    )
+    
+    R2_ACCOUNT_ID: Optional[str] = Field(
+        default=None,
+        description="Cloudflare R2 account ID"
+    )
+    
+    R2_PUBLIC_URL_BASE: Optional[str] = Field(
+        default=None,
+        description="Base URL for public R2 access (e.g., https://pub-123.r2.dev)"
+    )
+    
     # Upload URL expiration
     UPLOAD_URL_EXPIRATION_MINUTES: int = Field(
         default=60,
