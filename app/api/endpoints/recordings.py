@@ -768,13 +768,13 @@ async def generate_upload_url(
         from app.services.r2_storage import r2_storage
         
         # Verify recording exists
-        # service = RecordingService(db)
-        # recording = await service.get_recording_by_room_id(request.recording_id)
-        # if not recording:
-        #     raise HTTPException(
-        #         status_code=status.HTTP_404_NOT_FOUND,
-        #         detail="Recording not found"
-        #     )
+        service = RecordingService(db)
+        recording = await service.get_recording_by_room_id(request.recording_id)
+        if not recording:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Recording not found"
+            )
         
         # Generate pre-signed URL using R2 storage service
         # Use the recording ID as both recording_id and potentially get user_id from recording
@@ -783,7 +783,7 @@ async def generate_upload_url(
             chunk_index=request.chunk_index,
             content_type=request.content_type,
             user_type=request.user_type,
-            user_id="sdfasdf123",  # Use the host user ID from the recording
+            user_id=recording.host_user_id,  # Use the host user ID from the recording
             expires_in_minutes=settings.UPLOAD_URL_EXPIRATION_MINUTES
         )
         
