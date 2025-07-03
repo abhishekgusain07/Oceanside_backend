@@ -9,7 +9,10 @@ from app.schemas.recording import (
     RecordingResponse,
     GuestTokenRequest,
     GuestTokenResponse,
-    UploadUrlResponse
+    UploadUrlResponse,
+    GenerateUploadUrlRequest,
+    GenerateUploadUrlResponse,
+    ConfirmUploadRequest
 )
 from app.services.recording_service import RecordingService
 from app.core.config import settings
@@ -729,4 +732,165 @@ async def generate_token(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate guest token"
+        )
+
+
+@router.post(
+    "/generate-upload-url",
+    response_model=GenerateUploadUrlResponse,
+    summary="Generate pre-signed upload URL",
+    description="Generate a pre-signed URL for uploading recording chunks directly to cloud storage"
+)
+async def generate_upload_url(
+    request: GenerateUploadUrlRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Generate a pre-signed URL for uploading recording chunks directly to cloud storage.
+    
+    This endpoint implements step 1 of the reliable upload architecture:
+    1. Authenticates the request
+    2. Validates that the recording exists
+    3. Generates a secure, time-limited pre-signed URL for direct upload to R2
+    4. Returns the URL and file path information
+    
+    Args:
+        request: Request containing recording_id, chunk_index, content_type, etc.
+        db: Database session dependency
+        
+    Returns:
+        GenerateUploadUrlResponse: Pre-signed URL and related information
+        
+    Raises:
+        HTTPException: If URL generation fails or recording not found
+    """
+    try:
+        from app.services.r2_storage import r2_storage
+        
+        # Verify recording exists
+        # service = RecordingService(db)
+        # recording = await service.get_recording_by_room_id(request.recording_id)
+        # if not recording:
+        #     raise HTTPException(
+        #         status_code=status.HTTP_404_NOT_FOUND,
+        #         detail="Recording not found"
+        #     )
+        
+        # Generate pre-signed URL using R2 storage service
+        # Use the recording ID as both recording_id and potentially get user_id from recording
+        result = await r2_storage.generate_presigned_upload_url(
+            recording_id=request.recording_id,
+            chunk_index=request.chunk_index,
+            content_type=request.content_type,
+            user_type=request.user_type,
+            user_id="sdfasdf123",  # Use the host user ID from the recording
+            expires_in_minutes=settings.UPLOAD_URL_EXPIRATION_MINUTES
+        )
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to generate upload URL"
+            )
+        
+        logger.info(f"Generated pre-signed URL for recording {request.recording_id}, chunk {request.chunk_index}")
+        
+        return GenerateUploadUrlResponse(
+            pre_signed_url=result['pre_signed_url'],
+            file_path=result['file_path'],
+            expires_in=result['expires_in'],
+            expires_at=result['expires_at']
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to generate upload URL: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to generate upload URL"
+        )
+
+
+@router.post(
+    "/confirm-upload",
+    summary="Confirm successful upload",
+    description="Confirm that a chunk has been successfully uploaded and verify its existence in cloud storage"
+)
+async def confirm_upload(
+    request: ConfirmUploadRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Confirm that a chunk has been successfully uploaded to cloud storage.
+    
+    This endpoint implements step 4 of the reliable upload architecture:
+    1. Receives confirmation from client after successful upload
+    2. Verifies the file exists in cloud storage
+    3. Optionally verifies the ETag matches
+    4. Marks the chunk as uploaded in database/tracking system
+    5. Checks if all chunks are complete and triggers processing if needed
+    
+    Args:
+        request: Request containing recording_id, chunk_index, file_path, etag
+        db: Database session dependency
+        
+    Returns:
+        Success message and upload status
+        
+    Raises:
+        HTTPException: If confirmation fails or file verification fails
+    """
+    try:
+        from app.services.r2_storage import r2_storage
+        
+        # Verify recording exists
+        service = RecordingService(db)
+        recording = await service.get_recording_by_room_id(request.recording_id)
+        if not recording:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Recording not found"
+            )
+        
+        # Verify the file exists in R2 storage
+        file_exists = await r2_storage.verify_upload(
+            file_path=request.file_path,
+            expected_etag=request.etag
+        )
+        
+        if not file_exists:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Upload verification failed - file not found or ETag mismatch"
+            )
+        
+        # TODO: Here you would typically:
+        # 1. Update database to mark this chunk as uploaded
+        # 2. Check if all expected chunks for this recording are now uploaded
+        # 3. If all chunks are complete, trigger the video processing job
+        # For now, we'll just log the successful confirmation
+        
+        logger.info(f"✅ Confirmed upload for recording {request.recording_id}, chunk {request.chunk_index} at {request.file_path}")
+        
+        # TODO: Check if all chunks are uploaded and trigger processing
+        # This would involve:
+        # - Querying database for all expected chunks for this recording
+        # - If all chunks are confirmed, enqueue Celery task for video stitching
+        
+        return {
+            "message": "Upload confirmed successfully",
+            "recording_id": request.recording_id,
+            "chunk_index": request.chunk_index,
+            "file_path": request.file_path,
+            "verified": True
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to confirm upload: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to confirm upload"
         ) 

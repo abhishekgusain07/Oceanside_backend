@@ -1,7 +1,7 @@
 """
 Pydantic schemas for recording-related operations in the new architecture.
 """
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -17,13 +17,15 @@ class RecordingCreateRequest(BaseModel):
     description: Optional[str] = Field(None, max_length=2000, description="Optional recording description")
     max_participants: Optional[int] = Field(10, ge=2, le=50, description="Maximum number of participants")
 
-    @validator('user_id')
+    @field_validator('user_id')
+    @classmethod
     def validate_user_id(cls, v):
         if not v or not v.strip():
             raise ValueError('user_id cannot be empty')
         return v.strip()
 
-    @validator('title')
+    @field_validator('title')
+    @classmethod
     def validate_title(cls, v):
         if v is not None:
             v = v.strip()
@@ -45,6 +47,36 @@ class RecordingUploadUrlRequest(BaseModel):
     media_type: str = Field(..., description="Type of media: video or audio")
     chunk_index: int = Field(..., ge=0, description="Index of the chunk")
     content_type: Optional[str] = Field("video/webm", description="MIME type of the file")
+
+# New schemas for pre-signed URL generation (step 1 of plan)
+class GenerateUploadUrlRequest(BaseModel):
+    """Request model for generating pre-signed upload URLs as per the upload plan."""
+    recording_id: str = Field(..., description="The ID of the overall recording session")
+    chunk_index: int = Field(..., ge=0, description="The sequential number of the chunk (e.g., 1, 2, 3...)")
+    content_type: str = Field(default="video/webm", description="The MIME type of the file (e.g., video/webm)")
+    user_type: Optional[str] = Field(default="host", description="Type of user: host or guest")
+    
+    @field_validator('content_type')
+    @classmethod
+    def validate_content_type(cls, v):
+        allowed_types = ["video/webm", "video/mp4", "audio/webm", "audio/mp4"]
+        if v not in allowed_types:
+            raise ValueError(f'content_type must be one of: {allowed_types}')
+        return v
+
+class GenerateUploadUrlResponse(BaseModel):
+    """Response model for pre-signed upload URL generation."""
+    pre_signed_url: str = Field(..., description="Pre-signed URL for uploading the chunk")
+    file_path: str = Field(..., description="The object key/path where the file will be stored")
+    expires_in: int = Field(..., description="URL expiration time in seconds")
+    expires_at: datetime = Field(..., description="When the URL expires")
+
+class ConfirmUploadRequest(BaseModel):
+    """Request model for confirming successful upload."""
+    recording_id: str = Field(..., description="The ID of the overall recording session")
+    chunk_index: int = Field(..., ge=0, description="The sequential number of the chunk")
+    file_path: str = Field(..., description="The path of the file in the bucket")
+    etag: str = Field(..., description="The ETag returned by cloud storage after successful upload")
 
 # Response Schemas
 class RecordingResponse(BaseSchema):
