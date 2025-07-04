@@ -17,7 +17,8 @@ from typing import Dict, Any
 from datetime import datetime, timedelta
 
 from app.api.router import api_router
-from app.api.socketio_server import sio
+from app.api.simple_socketio import sio
+# from app.api.socketio_server import sio, enhanced_socketio_server
 from app.core.config import settings, get_settings
 from app.core.logging import configure_logging
 from app.core.database import get_db
@@ -80,6 +81,10 @@ async def lifespan(app: FastAPI):
     cleanup_task = asyncio.create_task(periodic_cleanup())
     logger.info("✅ Periodic cleanup task started")
     
+    # Start enhanced socket.io heartbeat monitoring
+    # enhanced_socketio_server.start_heartbeat_monitor()
+    logger.info("✅ Using simple Socket.IO server for debugging")
+    
     yield
     
     # Shutdown
@@ -131,8 +136,13 @@ async def cleanup():
     """Perform cleanup tasks before shutdown."""
     logger.info("Performing cleanup tasks...")
     
-    # TODO: Add Socket.IO cleanup when implemented
-    # Clean up Socket.IO connections
+    # Stop Socket.IO heartbeat monitor
+    # try:
+    #     await enhanced_socketio_server.stop_heartbeat_monitor()
+    #     logger.info("✅ Socket.IO heartbeat monitor stopped")
+    # except Exception as e:
+    #     logger.error(f"Error stopping heartbeat monitor: {e}")
+    logger.info("✅ Simple Socket.IO server cleanup complete")
     
     active_requests.clear()
 
@@ -290,10 +300,10 @@ def create_application() -> FastAPI:
     
     logger.info("Application startup complete")
     
-    # Mount Socket.IO at /socket.io/ path (default)
-    socket_app = socketio.ASGIApp(sio, application)
-    
-    return socket_app
+    return application
 
 # Create the app instance
-application = create_application()
+app = create_application()
+
+# Mount Socket.IO at /socket.io/ path (default)
+application = socketio.ASGIApp(sio, app)

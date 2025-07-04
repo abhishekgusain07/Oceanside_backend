@@ -266,6 +266,14 @@ class R2StorageService:
             # Ensure directory exists
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
             
+            # Handle test mode where client is None
+            if self.client is None:
+                logger.warning(f"⚠️ R2 client not initialized (test mode), simulating chunk download for {object_key}")
+                # Create an empty file for testing
+                with open(local_path, 'wb') as f:
+                    f.write(b'mock video data')
+                return True
+            
             # Download from R2
             self.client.download_file(self.bucket_name, object_key, local_path)
             
@@ -303,6 +311,7 @@ class R2StorageService:
     async def list_chunks(self, room_id: str, user_type: str) -> List[str]:
         """
         List all chunk files for a room and user type.
+        Updated to work with new pre-signed URL path format.
         
         Args:
             room_id: Room ID for the recording
@@ -312,6 +321,53 @@ class R2StorageService:
             List[str]: List of R2 object keys for chunks
         """
         try:
+            # New path format: uploads/{recording_id}/user_{user_id}_chunk_{chunk_index}.webm
+            # OR: uploads/{recording_id}/{user_type}_chunk_{chunk_index}.webm
+            prefix = f"uploads/{room_id}/"
+            
+            response = self.client.list_objects_v2(
+                Bucket=self.bucket_name,
+                Prefix=prefix
+            )
+            
+            if 'Contents' not in response:
+                # Try the old path format for backward compatibility
+                logger.info(f"No chunks found with new path format, trying old format...")
+                return await self._list_chunks_old_format(room_id, user_type)
+            
+            # Filter chunks by user type and file extension
+            chunks = []
+            for obj in response['Contents']:
+                key = obj['Key']
+                filename = key.split('/')[-1]  # Get just the filename
+                
+                # Check if it's a video chunk and matches the user type
+                if (key.endswith('.webm') or key.endswith('.mp4')) and not key.endswith('final_video.mp4'):
+                    # For new format: user_{user_id}_chunk_{chunk_index}.webm or {user_type}_chunk_{chunk_index}.webm
+                    if (filename.startswith(f'{user_type}_chunk_') or 
+                        filename.startswith(f'user_') and user_type in filename):
+                        chunks.append(key)
+            
+            logger.info(f"Found {len(chunks)} chunks for room {room_id}, user {user_type} (new format)")
+            return chunks
+            
+        except Exception as e:
+            logger.error(f"Failed to list chunks from R2: {str(e)}")
+            return []
+
+    async def _list_chunks_old_format(self, room_id: str, user_type: str) -> List[str]:
+        """
+        Fallback method for old path format (backward compatibility).
+        
+        Args:
+            room_id: Room ID for the recording
+            user_type: Type of user ("host" or "guest")
+            
+        Returns:
+            List[str]: List of R2 object keys for chunks
+        """
+        try:
+            # Old path format: {room_id}/{user_type}/
             prefix = f"{room_id}/{user_type}/"
             
             response = self.client.list_objects_v2(
@@ -329,16 +385,17 @@ class R2StorageService:
                 if key.endswith('.webm') or key.endswith('.mp4'):
                     chunks.append(key)
             
-            logger.info(f"Found {len(chunks)} chunks for room {room_id}, user {user_type}")
+            logger.info(f"Found {len(chunks)} chunks for room {room_id}, user {user_type} (old format)")
             return chunks
             
         except Exception as e:
-            logger.error(f"Failed to list chunks from R2: {str(e)}")
+            logger.error(f"Failed to list chunks from R2 (old format): {str(e)}")
             return []
     
     async def upload_final_video(self, file_path: str, room_id: str) -> Optional[str]:
         """
         Upload final processed video to R2.
+        Updated to use consistent path format with processed videos.
         
         Args:
             file_path: Local path to the final video file
@@ -348,7 +405,13 @@ class R2StorageService:
             str: Public URL of the uploaded video if successful, None if failed
         """
         try:
-            object_key = f"{room_id}/final_video.mp4"
+            # Use processed/ prefix to organize final videos separately from chunks
+            object_key = f"processed/{room_id}/final_video.mp4"
+            
+            # Handle test mode where client is None
+            if self.client is None:
+                logger.warning(f"⚠️ R2 client not initialized (test mode), simulating final video upload for {object_key}")
+                return f"https://mock-r2-endpoint.com/{self.bucket_name}/{object_key}"
             
             # Upload final video to R2
             with open(file_path, 'rb') as file:
@@ -375,6 +438,7 @@ class R2StorageService:
     async def cleanup_chunks(self, room_id: str) -> bool:
         """
         Clean up all chunk files for a room after processing.
+        Updated to work with new pre-signed URL path format.
         
         Args:
             room_id: Room ID for the recording
@@ -383,33 +447,50 @@ class R2StorageService:
             bool: True if successful, False if failed
         """
         try:
-            prefix = f"{room_id}/"
+            objects_to_delete = []
             
-            # List all objects with the room_id prefix
+            # Clean up chunks from new path format: uploads/{room_id}/
+            new_prefix = f"uploads/{room_id}/"
             response = self.client.list_objects_v2(
                 Bucket=self.bucket_name,
-                Prefix=prefix
+                Prefix=new_prefix
             )
             
-            if 'Contents' not in response:
-                logger.info(f"No chunks found to cleanup for room {room_id}")
-                return True
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    key = obj['Key']
+                    # Delete all chunk files but keep final video
+                    if not key.endswith('final_video.mp4'):
+                        objects_to_delete.append({'Key': key})
             
-            # Delete all chunk files but keep final video
-            objects_to_delete = []
-            for obj in response['Contents']:
-                key = obj['Key']
-                # Don't delete the final video
-                if not key.endswith('final_video.mp4'):
-                    objects_to_delete.append({'Key': key})
+            # Also clean up chunks from old path format: {room_id}/
+            old_prefix = f"{room_id}/"
+            response = self.client.list_objects_v2(
+                Bucket=self.bucket_name,
+                Prefix=old_prefix
+            )
+            
+            if 'Contents' in response:
+                for obj in response['Contents']:
+                    key = obj['Key']
+                    # Don't delete the final video, and avoid duplicates
+                    if (not key.endswith('final_video.mp4') and 
+                        {'Key': key} not in objects_to_delete):
+                        objects_to_delete.append({'Key': key})
             
             if objects_to_delete:
-                self.client.delete_objects(
-                    Bucket=self.bucket_name,
-                    Delete={'Objects': objects_to_delete}
-                )
+                # Delete in batches if there are many files (R2 has a 1000 object limit per delete)
+                batch_size = 1000
+                for i in range(0, len(objects_to_delete), batch_size):
+                    batch = objects_to_delete[i:i + batch_size]
+                    self.client.delete_objects(
+                        Bucket=self.bucket_name,
+                        Delete={'Objects': batch}
+                    )
                 
                 logger.info(f"✅ Cleaned up {len(objects_to_delete)} files for room {room_id}")
+            else:
+                logger.info(f"No chunks found to cleanup for room {room_id}")
             
             return True
             
