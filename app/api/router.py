@@ -12,7 +12,7 @@ api_router = APIRouter()
 api_router.include_router(health.router, prefix="/health", tags=["health"])
 api_router.include_router(metrics.router, prefix="/metrics", tags=["metrics"])
 
-# Recording endpoints
+# Recording endpoints - mount at /recordings for full path /api/v1/recordings
 from app.api.endpoints import recordings
 api_router.include_router(recordings.router, prefix="/recordings", tags=["recordings"])
 

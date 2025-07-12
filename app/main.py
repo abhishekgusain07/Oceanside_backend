@@ -168,11 +168,17 @@ def create_application() -> FastAPI:
     )
     
     # Add CORS middleware
+    cors_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+    if settings.ALLOWED_ORIGINS:
+        cors_origins.extend([str(origin) for origin in settings.ALLOWED_ORIGINS])
+    
+    logger.info(f"Configuring CORS with origins: {cors_origins}")
+    
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.ALLOWED_HOSTS if hasattr(settings, 'ALLOWED_HOSTS') else ["*"],
+        allow_origins=cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
         allow_headers=["*"],
     )
     
@@ -221,6 +227,18 @@ def create_application() -> FastAPI:
             "version": settings.VERSION,
             "environment": settings.ENVIRONMENT,
             "message": "Riverside backend is running"
+        }
+    
+    # Add Socket.IO health check endpoint
+    @application.get("/socket.io/health")
+    async def socketio_health_check():
+        from app.api.simple_socketio import sio
+        return {
+            "status": "healthy",
+            "socketio_enabled": True,
+            "message": "Socket.IO server is running",
+            "namespace": "/",
+            "path": "/socket.io/"
         }
     
     # Add request tracking middleware
@@ -303,7 +321,7 @@ def create_application() -> FastAPI:
     return application
 
 # Create the app instance
-app = create_application()
+fastapi_app = create_application()
 
 # Mount Socket.IO at /socket.io/ path (default)
-application = socketio.ASGIApp(sio, app)
+app = socketio.ASGIApp(sio, fastapi_app)

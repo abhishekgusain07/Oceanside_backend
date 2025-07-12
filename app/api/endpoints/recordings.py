@@ -865,18 +865,31 @@ async def confirm_upload(
                 detail="Upload verification failed - file not found or ETag mismatch"
             )
         
-        # TODO: Here you would typically:
-        # 1. Update database to mark this chunk as uploaded
-        # 2. Check if all expected chunks for this recording are now uploaded
-        # 3. If all chunks are complete, trigger the video processing job
+        # Update database to mark this chunk as uploaded
+        # TODO: You would implement chunk tracking in the database here
         # For now, we'll just log the successful confirmation
         
         logger.info(f"✅ Confirmed upload for recording {request.recording_id}, chunk {request.chunk_index} at {request.file_path}")
         
-        # TODO: Check if all chunks are uploaded and trigger processing
-        # This would involve:
-        # - Querying database for all expected chunks for this recording
-        # - If all chunks are confirmed, enqueue Celery task for video stitching
+        # Check if all chunks are uploaded and trigger processing
+        # For now, we'll trigger processing immediately after the first chunk
+        # In a real implementation, you'd track chunks in database
+        try:
+            from app.tasks.video_processing import process_video
+            
+            # Trigger the video processing task
+            # In production, you'd only do this when ALL chunks are confirmed
+            logger.info(f"🎬 Triggering video processing for recording {request.recording_id}")
+            task = process_video.delay(
+                room_id=request.recording_id,
+                recording_id=request.recording_id,
+                user_id=request.user_type  # Use user_type as user_id placeholder
+            )
+            logger.info(f"🎬 Video processing task queued with ID: {task.id}")
+            
+        except Exception as task_error:
+            logger.error(f"Failed to trigger video processing task: {str(task_error)}")
+            # Don't fail the confirmation just because the task failed to queue
         
         return {
             "message": "Upload confirmed successfully",
