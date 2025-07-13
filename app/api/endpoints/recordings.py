@@ -279,6 +279,86 @@ async def test_r2_connection():
 
 
 @router.get(
+    "/test-cors",
+    summary="Test CORS configuration",
+    description="Test if R2 bucket CORS is properly configured for direct uploads"
+)
+async def test_cors():
+    """
+    Test CORS configuration for R2 bucket.
+    
+    This endpoint helps diagnose CORS-related upload failures by:
+    1. Generating a test presigned URL
+    2. Providing CORS diagnostic information
+    3. Suggesting fixes for common CORS issues
+    
+    Returns:
+        CORS diagnostic information and recommendations
+    """
+    try:
+        from app.services.r2_storage import r2_storage
+        
+        # Generate a test presigned URL
+        result = await r2_storage.generate_presigned_upload_url(
+            recording_id="cors-test",
+            chunk_index=1,
+            content_type="video/webm",
+            user_type="host"
+        )
+        
+        cors_info = {
+            "bucket_name": r2_storage.bucket_name,
+            "endpoint_url": r2_storage.endpoint_url,
+            "test_url_generated": bool(result),
+            "cors_requirements": {
+                "allowed_methods": ["PUT", "POST", "GET", "HEAD", "DELETE"],
+                "allowed_headers": ["*"],
+                "expose_headers": ["ETag", "x-amz-request-id", "Content-Length"],
+                "allowed_origins": [
+                    "http://localhost:3000",
+                    "https://localhost:3000",
+                    "Your production domain"
+                ]
+            },
+            "common_issues": [
+                "Missing CORS configuration on R2 bucket",
+                "CORS not allowing PUT method for direct uploads",
+                "CORS not exposing ETag header for upload verification",
+                "Frontend origin not in allowed origins list"
+            ],
+            "setup_instructions": {
+                "script_path": "backend/scripts/setup_r2_cors.py",
+                "command": "python backend/scripts/setup_r2_cors.py",
+                "env_vars_required": [
+                    "R2_ACCESS_KEY_ID",
+                    "R2_SECRET_ACCESS_KEY", 
+                    "R2_ENDPOINT_URL",
+                    "R2_BUCKET_NAME"
+                ]
+            }
+        }
+        
+        if result and "mock" not in result.get('pre_signed_url', ''):
+            cors_info["status"] = "ready_for_testing"
+            cors_info["message"] = "R2 connection successful. Run the CORS setup script if uploads are failing."
+            cors_info["test_url_sample"] = result['pre_signed_url'][:100] + "..."
+        else:
+            cors_info["status"] = "connection_issue"
+            cors_info["message"] = "Unable to generate valid presigned URLs. Check R2 credentials."
+        
+        return cors_info
+        
+    except Exception as e:
+        logger.error(f"CORS test failed: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"CORS test failed: {str(e)}",
+            "error_type": type(e).__name__,
+            "recommendation": "Check R2 credentials and network connectivity"
+        }
+
+
+@router.get(
     "/{room_id}",
     response_model=RecordingResponse,
     summary="Get recording by room ID",
@@ -927,32 +1007,40 @@ async def confirm_upload(
         
         logger.info(f"✅ Confirmed upload for recording {request.recording_id}, chunk {request.chunk_index} at {request.file_path}")
         
+        # TODO: Implement proper chunk tracking in database
+        # For now, we'll defer processing until recording is stopped
+        # This prevents premature processing of incomplete recordings
+        
         # Check if all chunks are uploaded and trigger processing
-        # For now, we'll trigger processing immediately after the first chunk
-        # In a real implementation, you'd track chunks in database
-        try:
-            from app.tasks.video_processing import process_video
-            
-            # Trigger the video processing task
-            # In production, you'd only do this when ALL chunks are confirmed
-            logger.info(f"🎬 Triggering video processing for recording {request.recording_id}")
-            task = process_video.delay(
-                room_id=request.recording_id,
-                recording_id=request.recording_id,
-                user_id=request.user_type  # Use user_type as user_id placeholder
-            )
-            logger.info(f"🎬 Video processing task queued with ID: {task.id}")
-            
-        except Exception as task_error:
-            logger.error(f"Failed to trigger video processing task: {str(task_error)}")
-            # Don't fail the confirmation just because the task failed to queue
+        # Currently disabled to prevent processing incomplete recordings
+        # TODO: Re-enable when chunk counting is implemented
+        
+        # try:
+        #     from app.tasks.video_processing import process_video
+        #     
+        #     # Trigger the video processing task
+        #     # In production, you'd only do this when ALL chunks are confirmed
+        #     logger.info(f"🎬 Triggering video processing for recording {request.recording_id}")
+        #     task = process_video.delay(
+        #         room_id=request.recording_id,
+        #         recording_id=request.recording_id,
+        #         user_id=request.user_type  # Use user_type as user_id placeholder
+        #     )
+        #     logger.info(f"🎬 Video processing task queued with ID: {task.id}")
+        #     
+        # except Exception as task_error:
+        #     logger.error(f"Failed to trigger video processing task: {str(task_error)}")
+        #     # Don't fail the confirmation just because the task failed to queue
+        
+        logger.info(f"✅ Upload confirmed but processing deferred until recording stops")
         
         return {
             "message": "Upload confirmed successfully",
             "recording_id": request.recording_id,
             "chunk_index": request.chunk_index,
             "file_path": request.file_path,
-            "verified": True
+            "verified": True,
+            "processing_status": "deferred_until_recording_complete"
         }
         
     except HTTPException:

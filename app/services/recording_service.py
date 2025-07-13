@@ -275,4 +275,87 @@ class RecordingService:
         except Exception as e:
             await self.db.rollback()
             logger.error(f"Error cleaning up expired tokens: {str(e)}")
-            return 0 
+            return 0
+    
+    async def trigger_video_processing(self, room_id: str, user_id: str) -> Optional[str]:
+        """
+        Trigger video processing for a completed recording.
+        
+        Args:
+            room_id: Room ID of the recording
+            user_id: User ID who stopped the recording
+            
+        Returns:
+            Celery task ID if successful, None otherwise
+        """
+        try:
+            # Get the recording
+            recording = await self.get_recording_by_room_id(room_id)
+            if not recording:
+                logger.error(f"Recording not found for room {room_id}")
+                return None
+            
+            # Check if recording is in a valid state for processing
+            if recording.status not in [RecordingStatus.CREATED, RecordingStatus.ACTIVE]:
+                logger.warning(f"Recording {room_id} is in {recording.status} state, cannot process")
+                return None
+            
+            # Update recording status to processing
+            success = await self.update_recording_status(room_id, RecordingStatus.PROCESSING)
+            if not success:
+                logger.error(f"Failed to update recording status for {room_id}")
+                return None
+            
+            # Increment processing attempts
+            recording.processing_attempts += 1
+            await self.db.commit()
+            
+            # Import and trigger the Celery task
+            from app.tasks.video_processing import process_video
+            
+            task = process_video.delay(
+                room_id=room_id,
+                recording_id=str(recording.id),
+                user_id=user_id
+            )
+            
+            logger.info(f"🎬 Video processing task triggered for recording {room_id} (task_id: {task.id})")
+            return task.id
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Error triggering video processing for room {room_id}: {str(e)}")
+            return None
+    
+    async def mark_recording_failed(self, room_id: str, error_message: str) -> bool:
+        """
+        Mark a recording as failed with error details.
+        
+        Args:
+            room_id: Room ID of the recording
+            error_message: Error message to store
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            stmt = select(Recording).where(Recording.room_id == room_id)
+            result = await self.db.execute(stmt)
+            recording = result.scalar_one_or_none()
+            
+            if not recording:
+                logger.warning(f"Recording with room_id {room_id} not found for failure marking")
+                return False
+            
+            recording.status = RecordingStatus.FAILED
+            recording.processing_error = error_message
+            recording.processed_at = datetime.utcnow()
+            
+            await self.db.commit()
+            logger.info(f"Marked recording {recording.id} as failed: {error_message}")
+            return True
+            
+        except Exception as e:
+            await self.db.rollback()
+            logger.error(f"Error marking recording as failed for room_id {room_id}: {str(e)}")
+            return False 

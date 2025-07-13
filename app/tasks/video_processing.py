@@ -49,6 +49,14 @@ def process_video(self, room_id: str, recording_id: str = "", user_id: str = "")
         # Update recording status to failed
         try:
             asyncio.run(update_recording_status(room_id, RecordingStatus.FAILED, str(e)))
+            
+            # Notify clients that processing failed
+            try:
+                from app.api.simple_socketio import emit_processing_update
+                asyncio.run(emit_processing_update(room_id, "failed", error=str(e)))
+            except Exception as notify_error:
+                logger.warning(f"Failed to emit processing failure: {str(notify_error)}")
+                
         except Exception as update_error:
             logger.error(f"Failed to update recording status: {str(update_error)}")
         
@@ -158,6 +166,13 @@ async def process_video_async_r2(room_id: str, recording_id: str, user_id: str) 
         
         # Update database with the final video URL
         await update_recording_status(room_id, RecordingStatus.COMPLETED, video_url)
+        
+        # Notify clients that processing is complete
+        try:
+            from app.api.simple_socketio import emit_processing_update
+            await emit_processing_update(room_id, "completed", video_url=video_url)
+        except Exception as e:
+            logger.warning(f"Failed to emit processing completion: {str(e)}")
         
         # Clean up chunks from R2 storage
         try:
