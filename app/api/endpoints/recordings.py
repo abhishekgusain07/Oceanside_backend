@@ -223,6 +223,62 @@ async def create_recording(
 
 
 @router.get(
+    "/test-r2-connection",
+    summary="Test R2 storage connection",
+    description="Test the connection to Cloudflare R2 storage and return status"
+)
+async def test_r2_connection():
+    """
+    Test R2 storage connection for debugging purposes.
+    
+    Returns:
+        Connection status and any error details
+    """
+    try:
+        from app.services.r2_storage import r2_storage
+        
+        # Try to get a simple pre-signed URL to test connectivity
+        result = await r2_storage.generate_presigned_upload_url(
+            recording_id="test-connection",
+            chunk_index=1,
+            content_type="video/webm",
+            user_type="host"
+        )
+        
+        if result:
+            if "mock" in result.get('pre_signed_url', ''):
+                return {
+                    "status": "test_mode",
+                    "message": "R2 storage is in test mode (mock URLs)",
+                    "bucket": r2_storage.bucket_name,
+                    "endpoint": r2_storage.endpoint_url
+                }
+            else:
+                return {
+                    "status": "connected",
+                    "message": "R2 storage connection successful",
+                    "bucket": r2_storage.bucket_name,
+                    "endpoint": r2_storage.endpoint_url,
+                    "test_url_generated": True
+                }
+        else:
+            return {
+                "status": "failed",
+                "message": "Failed to generate pre-signed URL",
+                "bucket": r2_storage.bucket_name,
+                "endpoint": r2_storage.endpoint_url
+            }
+            
+    except Exception as e:
+        logger.error(f"R2 connection test failed: {str(e)}")
+        return {
+            "status": "error",
+            "message": f"R2 connection test failed: {str(e)}",
+            "error_type": type(e).__name__
+        }
+
+
+@router.get(
     "/{room_id}",
     response_model=RecordingResponse,
     summary="Get recording by room ID",

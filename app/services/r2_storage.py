@@ -21,20 +21,29 @@ class R2StorageService:
         self.bucket_name = settings.R2_BUCKET_NAME
         self.endpoint_url = settings.R2_ENDPOINT_URL
         self.public_url_base = settings.R2_PUBLIC_URL_BASE
+        self.riverside_prefix = settings.RIVERSIDE_PATH_PREFIX
         self.client = None
+        self.is_test_mode = False
         
         # Skip validation during testing
         if skip_validation:
             logger.info("⚠️ R2 client initialized in test mode (validation skipped)")
+            self.is_test_mode = True
             return
         
         # Validate required settings
+        missing_vars = []
         if not settings.R2_ACCESS_KEY_ID:
-            raise ValueError("R2_ACCESS_KEY_ID is required but not set")
+            missing_vars.append("R2_ACCESS_KEY_ID")
         if not settings.R2_SECRET_ACCESS_KEY:
-            raise ValueError("R2_SECRET_ACCESS_KEY is required but not set")
+            missing_vars.append("R2_SECRET_ACCESS_KEY")
         if not settings.R2_ENDPOINT_URL:
-            raise ValueError("R2_ENDPOINT_URL is required but not set")
+            missing_vars.append("R2_ENDPOINT_URL")
+        
+        if missing_vars:
+            error_msg = f"Missing required R2 environment variables: {', '.join(missing_vars)}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
         
         # Initialize boto3 client for R2
         try:
@@ -45,9 +54,18 @@ class R2StorageService:
                 aws_secret_access_key=settings.R2_SECRET_ACCESS_KEY,
                 region_name='auto'  # R2 uses 'auto' as region
             )
-            logger.info(f"✅ R2 client initialized successfully for bucket: {self.bucket_name}")
+            
+            # Test the connection by listing buckets
+            try:
+                response = self.client.list_buckets()
+                logger.info(f"✅ R2 client initialized successfully. Found {len(response.get('Buckets', []))} buckets")
+                logger.info(f"✅ Using bucket: {self.bucket_name}")
+            except Exception as test_error:
+                logger.warning(f"⚠️ R2 client initialized but connection test failed: {str(test_error)}")
+                
         except Exception as e:
-            logger.error(f"Failed to initialize R2 client: {str(e)}")
+            logger.error(f"❌ Failed to initialize R2 client: {str(e)}")
+            logger.error("Please check your R2 credentials and endpoint URL")
             raise
         
     async def generate_presigned_upload_url(
@@ -75,23 +93,23 @@ class R2StorageService:
             None if generation fails
         """
         try:
-            # Construct the object key (file path) as per plan specs
-            # Format: uploads/{recording_id}/user_{user_id}_chunk_{chunk_index}.webm
-            # Or if no user_id: uploads/{recording_id}/{user_type}_chunk_{chunk_index}.webm
+            # Construct the object key (file path) with riverside prefix
+            # Format: riverside/uploads/{recording_id}/user_{user_id}_chunk_{chunk_index}.webm
+            # Or if no user_id: riverside/uploads/{recording_id}/{user_type}_chunk_{chunk_index}.webm
             file_extension = content_type.split('/')[-1] if '/' in content_type else 'webm'
             
             if user_id:
-                file_path = f"uploads/{recording_id}/user_{user_id}_chunk_{chunk_index}.{file_extension}"
+                file_path = f"{self.riverside_prefix}/uploads/{recording_id}/user_{user_id}_chunk_{chunk_index}.{file_extension}"
             else:
-                file_path = f"uploads/{recording_id}/{user_type}_chunk_{chunk_index}.{file_extension}"
+                file_path = f"{self.riverside_prefix}/uploads/{recording_id}/{user_type}_chunk_{chunk_index}.{file_extension}"
             
             # Calculate expiration time
             expires_in_seconds = expires_in_minutes * 60
             expires_at = datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)
             
             # Handle test mode where client is None
-            if self.client is None:
-                logger.warning("⚠️ R2 client not initialized (test mode), returning mock pre-signed URL")
+            if self.is_test_mode or self.client is None:
+                logger.warning("⚠️ R2 client in test mode, returning mock pre-signed URL")
                 return {
                     'pre_signed_url': f"https://mock-r2-endpoint.com/{self.bucket_name}/{file_path}?mock=true",
                     'file_path': file_path,
@@ -136,8 +154,8 @@ class R2StorageService:
         """
         try:
             # Handle test mode where client is None
-            if self.client is None:
-                logger.warning("⚠️ R2 client not initialized (test mode), simulating upload verification")
+            if self.is_test_mode or self.client is None:
+                logger.warning("⚠️ R2 client in test mode, simulating upload verification")
                 # In test mode, always return True for verification
                 # unless we're specifically testing failure scenarios
                 return True
@@ -187,8 +205,8 @@ class R2StorageService:
             str: R2 object key if successful, None if failed
         """
         try:
-            # Construct the R2 object key maintaining the folder structure
-            object_key = f"{room_id}/{user_type}/{chunk_name}"
+            # Construct the R2 object key with riverside prefix
+            object_key = f"{self.riverside_prefix}/{room_id}/{user_type}/{chunk_name}"
             
             # Handle test mode where client is None
             if self.client is None:
@@ -228,8 +246,8 @@ class R2StorageService:
             str: R2 object key if successful, None if failed
         """
         try:
-            # Construct the R2 object key for metadata
-            object_key = f"{room_id}/{user_type}/{user_type}.txt"
+            # Construct the R2 object key for metadata with riverside prefix
+            object_key = f"{self.riverside_prefix}/{room_id}/{user_type}/{user_type}.txt"
             
             # Handle test mode where client is None
             if self.client is None:
@@ -296,7 +314,7 @@ class R2StorageService:
             str: Metadata content if successful, None if failed
         """
         try:
-            object_key = f"{room_id}/{user_type}/{user_type}.txt"
+            object_key = f"{self.riverside_prefix}/{room_id}/{user_type}/{user_type}.txt"
             
             response = self.client.get_object(Bucket=self.bucket_name, Key=object_key)
             content = response['Body'].read().decode('utf-8')
@@ -321,9 +339,9 @@ class R2StorageService:
             List[str]: List of R2 object keys for chunks
         """
         try:
-            # New path format: uploads/{recording_id}/user_{user_id}_chunk_{chunk_index}.webm
-            # OR: uploads/{recording_id}/{user_type}_chunk_{chunk_index}.webm
-            prefix = f"uploads/{room_id}/"
+            # New path format with riverside prefix: riverside/uploads/{recording_id}/user_{user_id}_chunk_{chunk_index}.webm
+            # OR: riverside/uploads/{recording_id}/{user_type}_chunk_{chunk_index}.webm
+            prefix = f"{self.riverside_prefix}/uploads/{room_id}/"
             
             response = self.client.list_objects_v2(
                 Bucket=self.bucket_name,
@@ -367,8 +385,8 @@ class R2StorageService:
             List[str]: List of R2 object keys for chunks
         """
         try:
-            # Old path format: {room_id}/{user_type}/
-            prefix = f"{room_id}/{user_type}/"
+            # Old path format with riverside prefix: riverside/{room_id}/{user_type}/
+            prefix = f"{self.riverside_prefix}/{room_id}/{user_type}/"
             
             response = self.client.list_objects_v2(
                 Bucket=self.bucket_name,
@@ -405,8 +423,8 @@ class R2StorageService:
             str: Public URL of the uploaded video if successful, None if failed
         """
         try:
-            # Use processed/ prefix to organize final videos separately from chunks
-            object_key = f"processed/{room_id}/final_video.mp4"
+            # Use riverside/processed/ prefix to organize final videos separately from chunks
+            object_key = f"{self.riverside_prefix}/processed/{room_id}/final_video.mp4"
             
             # Handle test mode where client is None
             if self.client is None:
@@ -449,8 +467,8 @@ class R2StorageService:
         try:
             objects_to_delete = []
             
-            # Clean up chunks from new path format: uploads/{room_id}/
-            new_prefix = f"uploads/{room_id}/"
+            # Clean up chunks from new path format: riverside/uploads/{room_id}/
+            new_prefix = f"{self.riverside_prefix}/uploads/{room_id}/"
             response = self.client.list_objects_v2(
                 Bucket=self.bucket_name,
                 Prefix=new_prefix
@@ -463,8 +481,8 @@ class R2StorageService:
                     if not key.endswith('final_video.mp4'):
                         objects_to_delete.append({'Key': key})
             
-            # Also clean up chunks from old path format: {room_id}/
-            old_prefix = f"{room_id}/"
+            # Also clean up chunks from old path format: riverside/{room_id}/
+            old_prefix = f"{self.riverside_prefix}/{room_id}/"
             response = self.client.list_objects_v2(
                 Bucket=self.bucket_name,
                 Prefix=old_prefix
@@ -507,12 +525,10 @@ def get_r2_storage() -> R2StorageService:
     import os
     global _r2_storage_instance
     if _r2_storage_instance is None:
-        # Check if we're in a testing environment or missing required env vars
+        # Only enter test mode for actual pytest runs, not missing env vars
         is_testing = (
             "pytest" in os.environ.get("_", "") or
-            "PYTEST_CURRENT_TEST" in os.environ or
-            not settings.R2_ENDPOINT_URL or
-            not settings.R2_ACCESS_KEY_ID
+            "PYTEST_CURRENT_TEST" in os.environ
         )
         _r2_storage_instance = R2StorageService(skip_validation=is_testing)
     return _r2_storage_instance

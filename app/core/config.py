@@ -101,6 +101,11 @@ class Settings(BaseSettings):
         description="Base URL for public R2 access (e.g., https://pub-123.r2.dev)"
     )
     
+    RIVERSIDE_PATH_PREFIX: str = Field(
+        default="riverside",
+        description="Path prefix for Riverside files within the R2 bucket"
+    )
+    
     # Upload URL expiration
     UPLOAD_URL_EXPIRATION_MINUTES: int = Field(
         default=60,
